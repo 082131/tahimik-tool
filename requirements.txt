@@ -1,0 +1,34 @@
+# =============================================================================
+# TAHIMIK: Noise-Adaptive Byte-Level Compression for Tagalog and Taglish
+#          Social Media Text Normalization
+# =============================================================================
+# Core Dependencies
+# =============================================================================
+
+# Deep learning framework
+torch>=2.1.0
+transformers>=4.36.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Evaluation metrics
+sacrebleu>=2.3.0       # chrF computation
+nltk>=3.8.0            # GLEU+ n-gram computation
+editdistance>=0.6.0    # Edit distance for ERR and noise level (n*)
+
+# Statistical testing
+scipy>=1.11.0          # Wilcoxon signed-rank test
+scikit-learn>=1.3.0    # General ML utilities
+
+# Visualization and logging
+matplotlib>=3.7.0
+tqdm>=4.65.0
+tensorboard>=2.14.0
+
+# Reproducibility
+pyyaml>=6.0
+
+# Inter-annotator agreement
+krippendorff>=0.6.0

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project outputs
+outputs/
+checkpoints/
+*.pt
+*.bin
+
+# Data (tracked separately — too large for git)
+data/*.csv
+data/*.json
+data/*.txt
+!data/.gitkeep
+
+# Logs
+*.log
+logs/
+runs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# PDF manuscripts (large binary files)
+*.pdf
