@@ -1,5 +1,7 @@
 # TAHIMIK
 
+[![tests](https://github.com/082131/tahimik-tool/actions/workflows/tests.yml/badge.svg)](https://github.com/082131/tahimik-tool/actions/workflows/tests.yml)
+
 **Text Augmentation and Harmonization of Informal and Multilingual Input for Knowledge Extraction**
 
 A noise-adaptive byte-level compression system for Tagalog and Taglish social media text normalization. Built on ByT5 and MrT5, with a learned delete gate conditioned on per-sentence noise estimation.
