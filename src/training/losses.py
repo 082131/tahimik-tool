@@ -103,20 +103,28 @@ class TAHIMIKLoss(nn.Module):
             losses["l_rate"] = l_rate
             total = total + self.w_rate * l_rate
 
-            # ── L_attn_reg: Attention regularizer ───────────────────────
-            # Penalizes gate outputs that are close to 0 (keep) — encourages
-            # the gate to commit to either keeping or deleting, not hovering.
-            gate_outputs = model_outputs["gate_outputs"]
+            # ── L_attn_reg: Gate commitment regularizer ─────────────────
+            # Encourages the gate to commit to keep (p→1) or delete (p→0)
+            # rather than sitting at an indecisive p≈0.5, which would leave
+            # every byte half-attended and blur the compression decision.
+            #
+            #   L = mean( 4 * p * (1 - p) )
+            #
+            # Maximal (1.0) at p=0.5, zero at p=0 and p=1, so it is SYMMETRIC:
+            # it expresses no preference between keeping and deleting. Which
+            # way a byte goes is decided by L_rate and L_CE.
+            #
+            # NOTE (deviation from the manuscript): MrT5 Appendix D defines
+            # this term over attention weights, penalising attention paid to
+            # deleted positions, which requires materialising per-head
+            # attention matrices. The symmetric form below serves the same
+            # purpose — stopping the gate from hedging — at negligible cost.
+            # The previous implementation penalised (1 - gate/k)^2, which is
+            # minimised by sending EVERY gate to k, i.e. deleting the whole
+            # sequence; it was the only gradient reaching the gate.
+            keep_prob = model_outputs["keep_prob"]
 
-            # Gate outputs are in [k, 0]. Values near 0 mean "keep".
-            # Penalize: mean of (gate_output / k)^2 for outputs near 0.
-            # This pushes uncertain scores toward k (delete).
-            gate_k = gate_outputs.min().item() if gate_outputs.numel() > 0 else -30.0
-            if gate_k == 0:
-                gate_k = -30.0
-
-            normalized_gates = gate_outputs / gate_k
-            l_attn_reg = ((1.0 - normalized_gates) ** 2).mean()
+            l_attn_reg = (4.0 * keep_prob * (1.0 - keep_prob)).mean()
             losses["l_attn_reg"] = l_attn_reg
             total = total + self.w_attn_reg * l_attn_reg
 

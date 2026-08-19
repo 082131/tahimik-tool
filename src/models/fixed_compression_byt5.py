@@ -66,12 +66,29 @@ class FixedCompressionByT5(nn.Module):
         attention_mask: torch.Tensor,
         start_layer: int,
         end_layer: int,
+        gate_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Run a subset of encoder layers on the hidden states."""
+        """
+        Run a subset of encoder layers on the hidden states.
+
+        Args:
+            gate_bias: Optional per-byte gate scores in [k, 0], shape
+                (batch, seq_len). Added to the attention logits as a log-space
+                penalty — the way MrT5 implements soft deletion.
+
+                It must be ADDED to the extended mask, not multiplied into the
+                binary mask: HuggingFace builds the additive mask as
+                `(1 - mask) * finfo.min`, so a mask of 0.99997 becomes a bias
+                of -1.1e34, which softmax reads as -inf. Multiplying would
+                make the "soft" mask hard and kill the gradient.
+        """
         encoder = self.model.encoder
         extended_mask = encoder.get_extended_attention_mask(
             attention_mask, hidden_states.shape[:2], hidden_states.device
         )
+
+        if gate_bias is not None:
+            extended_mask = extended_mask + gate_bias[:, None, None, :]
 
         for i in range(start_layer, end_layer):
             layer = encoder.block[i]
@@ -118,32 +135,40 @@ class FixedCompressionByT5(nn.Module):
         )
 
         # ── Step 3: Delete gate ─────────────────────────────────────────
-        gate_outputs, kept_mask, deletion_rate = self.delete_gate(
+        gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
             hidden_states, attention_mask
         )
 
-        # ── Step 4: Apply deletion ──────────────────────────────────────
+        # ── Step 4/5: Apply deletion, then post-gate encoder layers ─────
         if self.training:
-            # Soft deletion: modify attention mask using gate scores
-            # Gate outputs are in [k, 0]; shift to [0, 1] for masking
-            soft_mask = 1.0 + (gate_outputs.squeeze(-1) / abs(self.config.gate_k))
-            modified_mask = attention_mask.float() * soft_mask
+            # SOFT deletion: gate score added to attention logits as a
+            # log-space penalty. Differentiable; length unchanged.
+            modified_mask = attention_mask
+            hidden_states = self._run_encoder_layers(
+                hidden_states, attention_mask,
+                start_layer=self.delete_gate_layer,
+                end_layer=num_layers,
+                gate_bias=gate_outputs.squeeze(-1),
+            )
         else:
-            # Hard deletion: physically remove bytes
+            # HARD deletion: bytes physically removed — the actual speedup.
             hidden_states, modified_mask = self.delete_gate.apply_hard_deletion(
                 hidden_states, kept_mask
             )
-
-        # ── Step 5: Post-gate encoder layers ────────────────────────────
-        hidden_states = self._run_encoder_layers(
-            hidden_states, modified_mask,
-            start_layer=self.delete_gate_layer,
-            end_layer=num_layers,
-        )
+            hidden_states = self._run_encoder_layers(
+                hidden_states, modified_mask,
+                start_layer=self.delete_gate_layer,
+                end_layer=num_layers,
+            )
 
         # Final layer norm
         hidden_states = encoder.final_layer_norm(hidden_states)
         hidden_states = encoder.dropout(hidden_states)
+
+        if self.training:
+            # Suppress deleted bytes in what the decoder sees. Applied after
+            # the final norm, since RMS normalisation would undo it.
+            hidden_states = hidden_states * keep_prob.unsqueeze(-1)
 
         # ── Step 6: Decoder ─────────────────────────────────────────────
         encoder_outputs = (hidden_states,)
@@ -161,6 +186,7 @@ class FixedCompressionByT5(nn.Module):
             result = {
                 "logits": lm_logits,
                 "gate_outputs": gate_outputs,
+                "keep_prob": keep_prob,
                 "kept_mask": kept_mask,
                 "deletion_rate": deletion_rate,
                 "encoder_last_hidden_state": hidden_states,
@@ -184,6 +210,7 @@ class FixedCompressionByT5(nn.Module):
             return {
                 "logits": lm_logits,
                 "gate_outputs": gate_outputs,
+                "keep_prob": keep_prob,
                 "kept_mask": kept_mask,
                 "deletion_rate": deletion_rate,
                 "encoder_last_hidden_state": hidden_states,
@@ -219,7 +246,7 @@ class FixedCompressionByT5(nn.Module):
         )
 
         # Delete gate (hard mode in eval)
-        gate_outputs, kept_mask, deletion_rate = self.delete_gate(
+        gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
             hidden_states, attention_mask
         )
         hidden_states, compressed_mask = self.delete_gate.apply_hard_deletion(

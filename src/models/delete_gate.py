@@ -88,9 +88,9 @@ class DeleteGate(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
         noise_scores: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Compute gate scores and apply soft or hard deletion.
+        Compute gate scores and the resulting keep probabilities.
 
         Args:
             hidden_states: Encoder hidden states at the gate layer.
@@ -101,12 +101,18 @@ class DeleteGate(nn.Module):
                 Shape: (batch_size,). Required if noise_adaptive=True.
 
         Returns:
-            gate_outputs: Per-byte gate scores in [k, 0].
+            gate_outputs: Per-byte gate scores in [k, 0]. Used as an additive
+                log-space bias on attention logits during training.
                 Shape: (batch_size, seq_len, 1)
-            kept_mask: Binary mask of bytes that survived deletion.
+            keep_prob: Differentiable keep probability in [0, 1], derived from
+                the gate score. Shape: (batch_size, seq_len)
+            kept_mask: Binary mask of bytes that survive HARD deletion.
                 Shape: (batch_size, seq_len)
-            deletion_rate: Actual fraction of bytes deleted per sentence.
-                Shape: (batch_size,)
+            deletion_rate: Fraction of bytes deleted per sentence, in [0, 1].
+                Differentiable during training (computed from keep_prob) so
+                that L_rate can actually train the gate; computed from the
+                hard mask during inference so the reported rate is the real
+                one. Shape: (batch_size,)
         """
         batch_size, seq_len, _ = hidden_states.shape
 
@@ -144,25 +150,35 @@ class DeleteGate(nn.Module):
             # Clamp back to valid range [k, 0]
             gate_outputs = gate_outputs.clamp(min=self.k, max=0.0)
 
-        # ── Step 3: Apply deletion ──────────────────────────────────────
+        # ── Step 3: Keep probability (differentiable) ───────────────────
+        # Map the gate score from [k, 0] onto a keep probability in [0, 1]:
+        #   gate = 0  → p = 1  (definitely keep)
+        #   gate = k  → p = 0  (definitely delete)
+        # This is the differentiable quantity the rate loss is computed from.
+        keep_prob = 1.0 + (gate_outputs.squeeze(-1) / abs(self.k))
+        keep_prob = keep_prob * attention_mask.float()  # padding never counts
+
+        # ── Step 4: Hard keep/delete decision ───────────────────────────
+        # Used for physical deletion at inference and for reporting the true
+        # rate. Non-differentiable by construction (it is a threshold).
+        kept_mask = (gate_outputs.squeeze(-1) > self.hard_threshold).float()
+        kept_mask = kept_mask * attention_mask.float()
+
+        # ── Step 5: Deletion rate ───────────────────────────────────────
+        # real_tokens excludes padding, so the rate is always a genuine
+        # fraction of the sentence in [0, 1].
+        real_tokens = attention_mask.float().sum(dim=1).clamp(min=1.0)
+
         if self.training:
-            # Soft deletion: gate outputs become attention masks
-            # (handled externally by the model's attention modification)
-            kept_mask = torch.ones(batch_size, seq_len, device=hidden_states.device)
+            # Soft (differentiable) rate — this is what makes L_rate able to
+            # push the gate toward its target. Using the hard mask here would
+            # produce a constant with no gradient.
+            deletion_rate = 1.0 - (keep_prob.sum(dim=1) / real_tokens)
         else:
-            # Hard deletion: bytes below threshold are removed
-            kept_mask = (gate_outputs.squeeze(-1) > self.hard_threshold).float()
+            # Hard rate — the compression actually achieved at inference.
+            deletion_rate = 1.0 - (kept_mask.sum(dim=1) / real_tokens)
 
-            # Never delete padding positions (they're already masked)
-            kept_mask = kept_mask * attention_mask.float()
-
-        # ── Step 4: Compute deletion rate ───────────────────────────────
-        # Count real tokens (non-padding) and how many were kept
-        real_tokens = attention_mask.float().sum(dim=1)
-        kept_tokens = kept_mask.sum(dim=1)
-        deletion_rate = 1.0 - (kept_tokens / real_tokens.clamp(min=1.0))
-
-        return gate_outputs, kept_mask, deletion_rate
+        return gate_outputs, keep_prob, kept_mask, deletion_rate
 
     def apply_hard_deletion(
         self,
