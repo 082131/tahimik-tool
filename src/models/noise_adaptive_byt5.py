@@ -28,6 +28,7 @@
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, T5ForConditionalGeneration
+from transformers.modeling_outputs import BaseModelOutput
 from typing import Dict, Optional
 
 from src.models.noise_estimator import NoiseEstimator
@@ -100,8 +101,12 @@ class NoiseAdaptiveByT5(nn.Module):
                 the gradient.
         """
         encoder = self.model.encoder
+        # Pass only the two positional arguments. The third parameter is
+        # `device` in transformers 4.x but `dtype` in 5.x, so passing a device
+        # positionally raises TypeError on 5.x. Two args works on both, and
+        # the result already lands on the mask's device.
         extended_mask = encoder.get_extended_attention_mask(
-            attention_mask, hidden_states.shape[:2], hidden_states.device
+            attention_mask, hidden_states.shape[:2]
         )
 
         if gate_bias is not None:
@@ -306,9 +311,14 @@ class NoiseAdaptiveByT5(nn.Module):
         )
         hidden_states = encoder.final_layer_norm(hidden_states)
 
-        # Beam-search decode
+        # Beam-search decode.
+        # encoder_outputs must be a BaseModelOutput, not a bare tuple —
+        # generate() reads .last_hidden_state from it to size the beams. Given
+        # a tuple it cannot find the encoder states, falls through to the
+        # "no input_ids" branch, and raises:
+        #   ValueError: `bos_token_id` has to be defined when no `input_ids`...
         return self.model.generate(
-            encoder_outputs=(hidden_states,),
+            encoder_outputs=BaseModelOutput(last_hidden_state=hidden_states),
             attention_mask=compressed_mask,
             max_length=max_length,
             num_beams=num_beams,
