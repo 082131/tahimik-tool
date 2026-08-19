@@ -1,0 +1,177 @@
+/* === Google Fonts === */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+/* === Design Tokens via Tailwind v4 @theme === */
+@theme {
+  --font-sans: 'Inter', 'Noto Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: 'Noto Sans', 'Inter', system-ui, sans-serif;
+
+  /* Slate-based dark palette */
+  --color-surface-0: #0b0f19;
+  --color-surface-1: #111827;
+  --color-surface-2: #1e293b;
+  --color-surface-3: #334155;
+  --color-surface-glass: rgba(30, 41, 59, 0.7);
+
+  /* Teal accents */
+  --color-accent: #2dd4bf;
+  --color-accent-hover: #5eead4;
+  --color-accent-muted: rgba(45, 212, 191, 0.15);
+
+  /* Functional colors */
+  --color-amber: #f59e0b;
+  --color-amber-muted: rgba(245, 158, 11, 0.15);
+  --color-rose: #f43f5e;
+  --color-rose-muted: rgba(244, 63, 94, 0.15);
+  --color-violet: #8b5cf6;
+  --color-violet-muted: rgba(139, 92, 246, 0.15);
+  --color-emerald: #10b981;
+  --color-emerald-muted: rgba(16, 185, 129, 0.15);
+
+  /* Text */
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+  --color-text-inverse: #0f172a;
+
+  /* Borders */
+  --color-border: rgba(148, 163, 184, 0.15);
+  --color-border-focus: rgba(45, 212, 191, 0.5);
+
+  /* Noisy text display — high contrast, no glass */
+  --color-noisy-bg: #0a0a0a;
+  --color-noisy-text: #f8fafc;
+  --color-noisy-border: rgba(148, 163, 184, 0.25);
+
+  /* Spacing */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+/* === Base styles === */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-sans);
+  background-color: var(--color-surface-0);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface-1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* === Focus styles === */
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* === Selection === */
+::selection {
+  background-color: var(--color-accent-muted);
+  color: var(--color-accent);
+}
+
+/* === Utility classes === */
+.glass-panel {
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.noisy-text-display {
+  background: var(--color-noisy-bg);
+  color: var(--color-noisy-text);
+  border: 1px solid var(--color-noisy-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.8;
+  padding: 1.25rem 1.5rem;
+  user-select: none;
+  -webkit-user-select: none;
+  font-variant-ligatures: none;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.01em;
+}
+
+/* === Animations === */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slide-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-fade-in {
+  animation: fade-in 200ms ease-out;
+}
+
+.animate-slide-in {
+  animation: slide-in-right 250ms ease-out;
+}
+
+.animate-slide-out {
+  animation: slide-out-right 250ms ease-in;
+}
+
+/* === Transitions === */
+.transition-colors-fast {
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+
+.transition-transform-fast {
+  transition: transform 150ms ease;
+}
