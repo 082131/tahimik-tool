@@ -28,6 +28,7 @@
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, T5ForConditionalGeneration
+from transformers.modeling_outputs import BaseModelOutput
 from typing import Dict, Optional
 
 from src.models.noise_estimator import NoiseEstimator
@@ -82,12 +83,36 @@ class NoiseAdaptiveByT5(nn.Module):
         attention_mask: torch.Tensor,
         start_layer: int,
         end_layer: int,
+        gate_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Run a subset of encoder layers on the hidden states."""
+        """
+        Run a subset of encoder layers on the hidden states.
+
+        Args:
+            gate_bias: Optional per-byte gate scores in [k, 0], shape
+                (batch, seq_len). Added directly to the attention logits as a
+                log-space penalty, which is how MrT5 implements soft deletion.
+
+                This must be ADDED to the extended mask, not multiplied into
+                the binary mask: HuggingFace converts a binary mask via
+                `(1 - mask) * finfo.min`, so a mask value of 0.99997 becomes a
+                bias of -1.1e34 and softmax treats it as -inf. Multiplying
+                would turn the intended soft mask into a hard one and destroy
+                the gradient.
+        """
         encoder = self.model.encoder
+        # Pass only the two positional arguments. The third parameter is
+        # `device` in transformers 4.x but `dtype` in 5.x, so passing a device
+        # positionally raises TypeError on 5.x. Two args works on both, and
+        # the result already lands on the mask's device.
         extended_mask = encoder.get_extended_attention_mask(
-            attention_mask, hidden_states.shape[:2], hidden_states.device
+            attention_mask, hidden_states.shape[:2]
         )
+
+        if gate_bias is not None:
+            # (batch, seq) -> (batch, 1, 1, seq) to broadcast over heads and
+            # query positions, then add as a log-space attention penalty.
+            extended_mask = extended_mask + gate_bias[:, None, None, :]
 
         for i in range(start_layer, end_layer):
             layer = encoder.block[i]
@@ -147,7 +172,7 @@ class NoiseAdaptiveByT5(nn.Module):
         noise_scores = self.noise_estimator(hidden_states, attention_mask)
 
         # ── Step 4: Delete gate (noise-conditioned) ─────────────────────
-        gate_outputs, kept_mask, deletion_rate = self.delete_gate(
+        gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
             hidden_states, attention_mask, noise_scores=noise_scores
         )
 
@@ -157,32 +182,46 @@ class NoiseAdaptiveByT5(nn.Module):
         # path through the noise estimator.
         target_deletion_rate = self.d_max * (1.0 - noise_scores.detach())
 
-        # ── Step 5: Apply deletion ──────────────────────────────────────
+        # ── Step 5/6: Apply deletion, then post-gate encoder layers ─────
         if self.training:
-            # Soft deletion: gate outputs as attention mask weights
-            soft_mask = 1.0 + (gate_outputs.squeeze(-1) / abs(self.config.gate_k))
-            modified_mask = attention_mask.float() * soft_mask
+            # SOFT deletion. The gate score is added to the attention logits
+            # as a log-space penalty, so a byte the gate wants to drop becomes
+            # progressively harder to attend to while staying differentiable.
+            # The sequence length is unchanged.
+            modified_mask = attention_mask
+            hidden_states = self._run_encoder_layers(
+                hidden_states, attention_mask,
+                start_layer=self.delete_gate_layer,
+                end_layer=num_layers,
+                gate_bias=gate_outputs.squeeze(-1),
+            )
         else:
-            # Hard deletion: physically remove bytes
+            # HARD deletion: bytes are physically removed, which is where the
+            # computational saving comes from.
             hidden_states, modified_mask = self.delete_gate.apply_hard_deletion(
                 hidden_states, kept_mask
             )
-
-        # ── Step 6: Post-gate encoder layers ────────────────────────────
-        hidden_states = self._run_encoder_layers(
-            hidden_states, modified_mask,
-            start_layer=self.delete_gate_layer,
-            end_layer=num_layers,
-        )
+            hidden_states = self._run_encoder_layers(
+                hidden_states, modified_mask,
+                start_layer=self.delete_gate_layer,
+                end_layer=num_layers,
+            )
 
         # Final layer norm
         hidden_states = encoder.final_layer_norm(hidden_states)
         hidden_states = encoder.dropout(hidden_states)
 
+        if self.training:
+            # Suppress deleted bytes in what the decoder cross-attends to.
+            # Applied AFTER the final norm — T5 uses RMS normalisation, which
+            # would otherwise rescale the suppression straight back out.
+            hidden_states = hidden_states * keep_prob.unsqueeze(-1)
+
         # ── Step 7: Decoder ─────────────────────────────────────────────
         result = {
             "noise_scores": noise_scores,
             "gate_outputs": gate_outputs,
+            "keep_prob": keep_prob,
             "kept_mask": kept_mask,
             "deletion_rate": deletion_rate,
             "target_deletion_rate": target_deletion_rate,
@@ -257,7 +296,7 @@ class NoiseAdaptiveByT5(nn.Module):
 
         # Noise estimation + gate
         noise_scores = self.noise_estimator(hidden_states, attention_mask)
-        gate_outputs, kept_mask, deletion_rate = self.delete_gate(
+        gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
             hidden_states, attention_mask, noise_scores=noise_scores
         )
         hidden_states, compressed_mask = self.delete_gate.apply_hard_deletion(
@@ -272,9 +311,14 @@ class NoiseAdaptiveByT5(nn.Module):
         )
         hidden_states = encoder.final_layer_norm(hidden_states)
 
-        # Beam-search decode
+        # Beam-search decode.
+        # encoder_outputs must be a BaseModelOutput, not a bare tuple —
+        # generate() reads .last_hidden_state from it to size the beams. Given
+        # a tuple it cannot find the encoder states, falls through to the
+        # "no input_ids" branch, and raises:
+        #   ValueError: `bos_token_id` has to be defined when no `input_ids`...
         return self.model.generate(
-            encoder_outputs=(hidden_states,),
+            encoder_outputs=BaseModelOutput(last_hidden_state=hidden_states),
             attention_mask=compressed_mask,
             max_length=max_length,
             num_beams=num_beams,
