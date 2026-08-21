@@ -95,6 +95,17 @@ python -m pytest tests/ -v
 
 Tests must pass before a PR is merged.
 
+They also run automatically on GitHub. Every push and every pull request
+triggers `.github/workflows/tests.yml`, which installs the dependencies and runs
+the suite on Python 3.10 and 3.11.
+
+- **Green check on a PR** — the suite passed on both versions.
+- **Red X** — something broke. Click **Details** on the failed check to see which
+  test failed and why. Do not merge until it is green.
+
+If a run fails only on one Python version, the cause is usually a dependency
+that resolved differently — read the install step's log before the test output.
+
 When fixing a bug, **write the test first** and confirm it fails against the
 broken code. A regression test that never failed proves nothing.
 `tests/test_delete_gate.py` is the model to follow: each test names the defect
