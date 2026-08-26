@@ -116,6 +116,9 @@ it guards against and explains why the behaviour matters.
 ## Repository layout
 
 ```
+.specify/             Spec-kit templates, scripts, and the constitution
+docs/                 Working agreements and process notes
+specs/                One directory per feature: spec, plan, tasks
 configs/              Hyperparameters — the study's control variables
 src/
   data/               Noise generation, datasets, preprocessing
@@ -129,6 +132,19 @@ backend/              FastAPI inference server
 frontend/             The TAHIMIK demo tool (React + Vite)
 annotation-platform/  Annotator app used to build the gold standard
 ```
+
+---
+
+## Specs
+
+Before a feature is built — or, for code that already exists, before it is
+defended — it gets a spec under `specs/NNN-name/`. The process, the division
+of labour between the two installed skill sets, and the order we are working
+through the existing code are described in
+[docs/SPEC-WORKFLOW.md](docs/SPEC-WORKFLOW.md).
+
+Short version: you are interrogated about the design, your answers become the
+spec, and the spec is what the panel reads.
 
 ---
 
