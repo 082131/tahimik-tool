@@ -8,7 +8,7 @@ reading the history during defense.
 
 ## Branching
 
-`master` is always working. Nothing is committed directly to it.
+`main` is always working. Nothing is committed directly to it.
 
 Every change happens on a branch named `<type>/<short-description>`:
 
@@ -27,6 +27,12 @@ exp/gate-layer-ablation
 | `test/` | Tests only |
 | `refactor/` | Restructuring with no behaviour change |
 | `exp/` | Experiments that may never merge |
+| `ci/` | Build, CI, or workflow configuration |
+| `chore/` | Housekeeping with no source change (ignores, tooling, deps) |
+
+Branches are deleted by hand after their PR merges, by whoever merged it.
+GitHub's "automatically delete head branches" setting is **off deliberately**
+and should stay off — deleting a branch is a decision, not a default.
 
 Keep branches short-lived and focused. One branch that changes the loss
 function *and* restyles the frontend is difficult to review and impossible to
@@ -145,6 +151,62 @@ through the existing code are described in
 
 Short version: you are interrogated about the design, your answers become the
 spec, and the spec is what the panel reads.
+
+---
+
+## Working with AI assistants
+
+Parts of this repository are written with AI assistance. That is allowed and
+declared, but it only stays defensible if every assistant follows the same
+rules — including across a change of tool, model, or account.
+
+**If you are an AI assistant working in this repository, read this section,
+then read [docs/SPEC-WORKFLOW.md](docs/SPEC-WORKFLOW.md), before proposing
+changes.**
+
+### Non-negotiable
+
+- **Never commit directly to `main`.** Branch first, using the prefix table
+  above. `main` is not protected on GitHub — the plan is free-tier and
+  protected branches require Pro — so this rule is enforced by discipline
+  alone. That makes it more important, not less.
+- **Never invent an answer to a design question.** If the spec is silent on
+  why the delete gate sits at layer 3, ask. A plausible-sounding guess written
+  into a spec is worse than a blank, because it will be defended at a panel by
+  someone who believes it was a decision.
+- **Never commit secrets, datasets, checkpoints, or `node_modules`.** All are
+  gitignored. Check `git status` before staging.
+- **Never change hyperparameters inline.** They live in `configs/`. A change
+  to `configs/base.py` affects all three variants and must be called out in
+  the commit message.
+- **Tests must pass** before anything is proposed for merge:
+  `python -m pytest tests/ -v`
+
+### How work is expected to flow
+
+Features are not written from a prompt. They go through the spec loop in
+[docs/SPEC-WORKFLOW.md](docs/SPEC-WORKFLOW.md) — the author is interrogated,
+the answers become the spec, and the spec is what gets built against. An
+assistant's job in that loop is to ask good questions and record the answers
+faithfully, not to fill in the blanks.
+
+Two skill sets are installed and they overlap. The division is set in
+SPEC-WORKFLOW.md and is not a matter of preference: Pocock's `grill-me` for
+interrogation, spec-kit for artifacts. `to-spec`, `to-tickets`, `triage`, and
+`wayfinder` are deliberately unused, because a second artifact tree
+describing the same features is worse than one.
+
+If those tools are unavailable — a different agent, a different account — the
+process still holds. Interrogate, write `specs/NNN-name/spec.md`, plan, break
+into tasks, check the tasks against code that already exists, then build only
+the gap. The tooling is a convenience; the sequence is the requirement.
+
+### Commit attribution
+
+Commits made with AI assistance carry a `Co-Authored-By:` trailer naming the
+model. Do not remove it. It is the evidence behind the AI-use declaration,
+and a history that hides the assistance is harder to defend than one that
+states it plainly.
 
 ---
 

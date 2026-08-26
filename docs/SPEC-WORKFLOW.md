@@ -102,28 +102,20 @@ cheap before it is applied to the core contribution.
 | 005 | Noise-adaptive ByT5 | The actual contribution. Spec this once the pattern is established. |
 | 006 | Two-stage training | Synthetic pretrain → gold fine-tune. |
 | 007 | Evaluation + statistics | Metrics, benchmarks, significance tests. |
-| 008 | Annotation platform | Separate app, separate concerns. |
+| 008 | Annotation platform | **Deferred** — still under development, see below. |
 | 009 | Demo tool (backend + frontend) | Not part of the contribution; spec last. |
 
 ---
 
-## Constraint: there is no dataset yet
+## Not in scope yet
 
-Until the gold standard exists, every spec must keep two things apart:
+The gold-standard dataset and the annotation platform that produces it are
+still under development. They do not get spec'd for now — specifying something
+whose shape is still changing weekly produces a document that is wrong by the
+time it is committed, and rewriting it every week is worse than not having it.
 
-- **Does the code run correctly?** Testable now. Tensor shapes, deletion
-  ratios on synthetic input, gate behaviour, config plumbing, error paths.
-- **Does the model perform well?** Not testable now. Requires real
-  Tagalog/Taglish pairs.
-
-Acceptance criteria go in the first category. Anything in the second is
-written into the spec as **BLOCKED: requires gold standard**, so it is
-visible as pending work rather than silently missing.
-
-This also settles the `byt5-small` question. `configs/base.py` currently
-pins `google/byt5-small` while the manuscript specifies `byt5-base` for real
-experiments. With no data, small is the right default — but the switch is a
-spec'd task with a known trigger, not something to remember later.
+They come into scope once the annotation platform settles and the dataset
+exists. Until then, feature 008 in the table above is a placeholder.
 
 ---
 
