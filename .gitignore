@@ -62,3 +62,6 @@ runs/
 
 # PDF manuscripts (large binary files)
 *.pdf
+
+# Local-only thesis context (manuscripts, reference papers, editor config)
+thesis_code/
