@@ -8,7 +8,7 @@ reading the history during defense.
 
 ## Branching
 
-`master` is always working. Nothing is committed directly to it.
+`main` is always working. Nothing is committed directly to it.
 
 Every change happens on a branch named `<type>/<short-description>`:
 
@@ -33,7 +33,7 @@ function *and* restyles the frontend is difficult to review and impossible to
 revert cleanly.
 
 ```bash
-git checkout master
+git checkout main
 git pull
 git checkout -b fix/some-thing
 ```
@@ -69,7 +69,7 @@ change to the loss function is how a result becomes unreproducible.
 
 ## Pull requests
 
-Push the branch and open a PR against `master`:
+Push the branch and open a PR against `main`:
 
 ```bash
 git push -u origin fix/some-thing
