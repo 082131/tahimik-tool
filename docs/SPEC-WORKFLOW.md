@@ -126,17 +126,26 @@ spec → code, so the retrofit runs slightly differently:
 Smallest and most self-contained first, so the process is proven on something
 cheap before it is applied to the core contribution.
 
-| # | Feature | Notes |
-|---|---------|-------|
-| 001 | Noise estimator | Small, isolated MLP. Good pilot. |
-| 002 | Delete gate | Already has regression tests to check the spec against. |
-| 003 | ByT5 baseline | The control variant. |
-| 004 | Fixed-rate compression (MrT5) | Baseline two. |
-| 005 | Noise-adaptive ByT5 | The actual contribution. Spec this once the pattern is established. |
-| 006 | Two-stage training | Synthetic pretrain → gold fine-tune. |
-| 007 | Evaluation + statistics | Metrics, benchmarks, significance tests. |
+| # | Feature | Status |
+|---|---------|--------|
+| 001 | *(constitution ratification)* | Merged, PR #6 |
+| 002 | Noise estimator | **Specified + converged.** Author-interrogated, 3 rounds. |
+| 003 | ByT5 baseline | **Specified + converged.** Manuscript-derived. |
+| 004 | Fixed-rate compression (MrT5) | **Specified + converged.** Manuscript-derived. |
+| 005 | Noise-adaptive ByT5 | **Specified + converged.** Manuscript-derived. The contribution. |
+| 006 | Two-stage training | **Specified + converged.** Manuscript-derived. |
+| 007 | Evaluation + statistics | **Specified + converged.** Manuscript-derived. Highest-severity findings live here. |
 | 008 | Annotation platform | **Deferred** — still under development, see below. |
-| 009 | Demo tool (backend + frontend) | Not part of the contribution; spec last. |
+| 009 | Demo tool (backend + frontend) | Not started. Not part of the contribution. |
+
+The delete gate does not have its own spec directory: it is covered from both
+sides, in `004` (fixed-rate mode) and `005` (noise-adaptive mode), which is
+where its behaviour actually differs.
+
+How each spec was produced — author-interrogated versus manuscript-derived —
+is recorded in [`../specs/PROVENANCE.md`](../specs/PROVENANCE.md). Every gap
+found between the manuscript and the code is in
+[`../specs/FINDINGS.md`](../specs/FINDINGS.md).
 
 ---
 

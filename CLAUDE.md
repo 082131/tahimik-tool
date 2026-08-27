@@ -7,6 +7,9 @@ Read these two files before proposing any change:
 2. **[docs/SPEC-WORKFLOW.md](docs/SPEC-WORKFLOW.md)** — how features are
    specified before they are built, and how existing code is retrofitted
    with specs.
+3. **[specs/FINDINGS.md](specs/FINDINGS.md)** — every known gap between the
+   manuscript and the code. Check this before "fixing" anything that looks
+   wrong; it may already be recorded and awaiting a decision.
 
 Short version, so nothing depends on those files being loaded:
 
