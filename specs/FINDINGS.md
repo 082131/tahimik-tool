@@ -100,6 +100,27 @@ and validation loss only.
 
 ---
 
+## Found by grilling, not by the first pass
+
+### 7a. Nothing constrains the sign of `cn`
+
+**Where**: `src/models/delete_gate.py:77`
+**Spec**: [005](005-noise-adaptive-byt5/spec.md) T016
+
+`cn` is the learned coefficient controlling how strongly noise shifts the
+keep/delete decision. It initialises to `1.0`, and nothing prevents it crossing
+zero during training.
+
+A negative `cn` **inverts the contribution**: noisy sentences would be
+compressed *more* rather than less, the exact opposite of the design. The model
+would still run, still converge, and still produce plausible numbers. No test
+detects it.
+
+This is the only finding here describing a failure with no visible symptom.
+Everything else either already works or is visibly incomplete.
+
+---
+
 ## Needs your decision, not a code change
 
 ### 7. `L_attn_reg` deviates from MrT5 Appendix D
@@ -117,6 +138,10 @@ paper, or document the substitution in the manuscript as deliberate. A reader
 comparing the two today would find an unacknowledged mismatch.
 
 ### 8. Two unspecified constants in the contribution
+
+**Both are marked `NEEDS CLARIFICATION` and their dependent tasks are BLOCKED**,
+per Constitution Principle II. They are not guesses awaiting confirmation; they
+are open questions awaiting an answer.
 
 **Where**: `src/models/delete_gate.py:81` and `:151`
 **Spec**: [005](005-noise-adaptive-byt5/spec.md) F3
@@ -158,3 +183,22 @@ Worth stating, because the list above reads worse than the codebase is:
 
 Of roughly 40 functional requirements checked across six specs, the substantial
 majority are already satisfied. The findings above are the exceptions.
+
+---
+
+## Where each finding lives
+
+Every spec now carries the full artifact set — `spec.md`, `research.md`,
+`plan.md`, `data-model.md`, `quickstart.md`, `tasks.md`. If you want to check a
+finding rather than take it on trust:
+
+- **`research.md`** records each design question, its answer, and the source
+  that settled it. Where the manuscript is silent, it says so instead of
+  inferring.
+- **`quickstart.md`** carries runnable checks. Spec 007's includes a hand
+  computation showing the two-tailed and one-tailed p-values diverging by
+  0.6014 against 0.3000 on identical data — the clearest way to see why finding
+  1 matters.
+- **`tasks.md`** holds the fix, numbered and scoped.
+
+112 tasks across six features.
