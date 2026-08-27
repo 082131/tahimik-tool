@@ -10,13 +10,17 @@ reading the history during defense.
 
 `main` is always working. Nothing is committed directly to it.
 
-Every change happens on a branch named `<type>/<short-description>`:
+"Working" is two checkable things, not a feeling: CI is green, and a
+synthetic-noise run started from `main` at `seed = 42` reproduces its previous
+output.
+
+Every change happens on a branch named `<type>/NNN-<short-description>`:
 
 ```
-fix/delete-gate-training-signal
-feat/normalization-tool
-docs/methodology-chapter
-exp/gate-layer-ablation
+fix/003-delete-gate-training-signal
+feat/007-normalization-tool
+docs/012-methodology-chapter
+exp/015-gate-layer-ablation
 ```
 
 | Prefix | Use for |
@@ -30,6 +34,20 @@ exp/gate-layer-ablation
 | `ci/` | Build, CI, or workflow configuration |
 | `chore/` | Housekeeping with no source change (ignores, tooling, deps) |
 
+**Every branch carries a number, including branches with no spec behind
+them.** The next number is one above the highest already used in either
+`specs/` or any existing branch name — check both before you cut a branch.
+
+Spec Kit numbers its own branches by scanning `specs/` alone, so it will
+happily reuse a number an unspec'd branch already took. When that happens the
+number you assigned wins, and the `specs/` directory gets renamed to match.
+Spec Kit also omits the `<type>/` prefix, so a branch it creates needs
+renaming before you push it:
+
+```bash
+git branch -m feat/002-noise-estimator
+```
+
 Branches are deleted by hand after their PR merges, by whoever merged it.
 GitHub's "automatically delete head branches" setting is **off deliberately**
 and should stay off — deleting a branch is a decision, not a default.
@@ -41,8 +59,13 @@ revert cleanly.
 ```bash
 git checkout main
 git pull
-git checkout -b fix/some-thing
+git checkout -b fix/004-some-thing
 ```
+
+`exp/` is the one prefix that skips the spec loop — see
+[docs/SPEC-WORKFLOW.md](docs/SPEC-WORKFLOW.md). It skips nothing else. An
+experiment still obeys `configs/`, the seed, and the tests, because the whole
+point of an experiment is that it might produce a number you want to keep.
 
 ---
 
@@ -88,8 +111,17 @@ The PR body should answer:
 3. Anything reviewers should look at closely?
 
 **At least one teammate reviews before merge.** For changes to `src/models/`
-or `src/training/`, the reviewer should be someone who can check the maths.
+or `src/training/`, the reviewer must be someone who can check the maths.
 That is the code the panel will question hardest.
+
+If no review arrives within **48 hours**, the author may merge and must say so
+in the PR, with the reason. That escape hatch exists to stop work deadlocking,
+not to be the normal path — if you are reaching for it every time, the review
+rule has failed and belongs in a conversation, not in a quiet workaround.
+
+Merge with a **merge commit, never a squash.** Squashing collapses the
+per-commit reasoning into one blob, and that reasoning is the part of this
+history worth reading.
 
 ---
 
@@ -151,6 +183,17 @@ through the existing code are described in
 
 Short version: you are interrogated about the design, your answers become the
 spec, and the spec is what the panel reads.
+
+A spec is required for every `feat/` branch and for any change to
+`src/models/` or `src/training/`, whatever the branch is called. Fixes, docs,
+CI, chores, and refactors elsewhere go straight to a branch and a PR — the
+loop protects the contribution, and applying it to a typo would turn it into
+ritual.
+
+The principles all of this answers to live in
+[`.specify/memory/constitution.md`](.specify/memory/constitution.md). Where
+this document and the constitution disagree, the constitution wins and this
+file is the one that needs fixing.
 
 ---
 
