@@ -113,14 +113,19 @@ The PR body should answer:
 2. How was it verified? (tests, a training run, a screenshot)
 3. Anything reviewers should look at closely?
 
-**At least one teammate reviews before merge.** For changes to `src/models/`
-or `src/training/`, the reviewer must be someone who can check the maths.
-That is the code the panel will question hardest.
+**Every PR is checked before merge.** Who does the checking depends on who
+opened it:
 
-If no review arrives within **48 hours**, the author may merge and must say so
-in the PR, with the reason. That escape hatch exists to stop work deadlocking,
-not to be the normal path — if you are reaching for it every time, the review
-rule has failed and belongs in a conversation, not in a quiet workaround.
+- **Your own PR** — your review plus an AI check is enough to merge. No
+  groupmate approval needed. The AI check goes in the PR thread, and you make
+  the merge call. An AI review helps you decide; it can't cast the formal
+  GitHub approval, and it isn't a substitute for reading the diff yourself.
+- **A groupmate's PR** — a human approves before merge. An AI review runs when
+  someone asks for one, not automatically.
+
+For changes to `src/models/` or `src/training/`, the code the panel questions
+hardest, get a maths-capable human to look when one is around. Your eyes plus
+an AI check are the floor there, not a replacement for a second person.
 
 Merge with a **merge commit, never a squash.** Squashing collapses the
 per-commit reasoning into one blob, and that reasoning is the part of this

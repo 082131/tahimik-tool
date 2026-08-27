@@ -160,6 +160,24 @@ was yours and the typing was assisted.
 
 ---
 
+## Why every PR gets checked, and who checks it
+
+A pull request is a proposed change, waiting to join `main`. Checking it before
+it merges is how bugs get caught before they become the "correct" version.
+
+Who checks depends on who opened it. On your own PR, your own read plus an AI
+check is enough to merge. You're mostly working solo, and waiting on a groupmate
+who isn't there would just stall the work. On a groupmate's PR, a human approves,
+and an AI review runs only if someone asks for one.
+
+An AI review is a help, not a verdict. It reads the change and flags what looks
+wrong, but a person always makes the merge decision, and the formal approval on
+GitHub can only come from a human account. For the model code the panel
+questions hardest, it's worth getting a second human to look when one is around.
+Two sets of eyes catch what one misses.
+
+---
+
 ## Why we keep every commit instead of squashing them
 
 When you merge a branch, GitHub can either keep its commits or "squash" them into
