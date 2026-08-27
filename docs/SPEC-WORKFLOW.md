@@ -48,6 +48,24 @@ of truth or none.
 
 ---
 
+## When a spec is required
+
+Not every change earns one. A spec is required for:
+
+- every `feat/` branch, anywhere in the repository
+- any change to `src/models/` or `src/training/`, whatever the branch type
+
+Everything else — fixes outside the model code, docs, CI, chores, refactors —
+goes straight to a branch and a PR. The loop exists to protect the thesis
+contribution. Pointing it at a typo fix turns it into ritual, and rituals get
+skipped precisely when they would have mattered.
+
+`exp/` branches skip the loop by design. An experiment is allowed to be
+unspecified; it is not allowed to be untraceable, so `configs/`, the seed, and
+the tests still apply in full.
+
+---
+
 ## The loop, per feature
 
 Run once for the project:
@@ -72,6 +90,21 @@ Then per feature, in order:
 Steps 1–3 are a conversation. You answer; nothing is invented on your behalf.
 If a question cannot be answered yet, the correct response is "unknown" —
 that gets recorded as an open question rather than papered over.
+
+### Open questions
+
+A question you cannot answer is marked `NEEDS CLARIFICATION` in the spec.
+Two rules govern them, and they are deliberately different:
+
+- **A spec may merge with open questions.** Some are blocked on the gold
+  standard, some on your adviser. Holding the whole spec hostage to a question
+  nobody can answer this week helps no one, and an unmerged spec is a spec
+  nobody reads.
+- **A task that depends on an open question may not be built.** `/tdd` does
+  not start on it. This is the rule that makes the first one safe.
+
+Documented and ready-to-build are different states. Blurring them is how a
+guess ends up in the codebase wearing a spec's authority.
 
 ---
 
