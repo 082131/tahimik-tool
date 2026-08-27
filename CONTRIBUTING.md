@@ -4,6 +4,9 @@ Working agreement for the TAHIMIK team. The goal is a repository where anyone
 can see what changed, why, and whether it still works — including a panelist
 reading the history during defense.
 
+New here, or wondering why a rule exists? [docs/WHY.md](docs/WHY.md) explains
+the reason behind each one in plain language.
+
 ---
 
 ## Branching
