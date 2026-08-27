@@ -102,7 +102,7 @@ and validation loss only.
 
 ## Found by grilling, not by the first pass
 
-### 7a. Nothing constrains the sign of `cn`
+### 7. Nothing constrains the sign of `cn`
 
 **Where**: `src/models/delete_gate.py:77`
 **Spec**: [005](005-noise-adaptive-byt5/spec.md) T016
@@ -123,7 +123,7 @@ Everything else either already works or is visibly incomplete.
 
 ## Needs your decision, not a code change
 
-### 7. `L_attn_reg` deviates from MrT5 Appendix D
+### 8. `L_attn_reg` deviates from MrT5 Appendix D
 
 **Where**: `src/training/losses.py:106-129`
 **Spec**: [004](004-fixed-rate-compression/spec.md) F2
@@ -137,7 +137,7 @@ The code is honest. The manuscript is silent. Either reconcile the code to the
 paper, or document the substitution in the manuscript as deliberate. A reader
 comparing the two today would find an unacknowledged mismatch.
 
-### 8. Two unspecified constants in the contribution
+### 9. Two unspecified constants in the contribution
 
 **Both are marked `NEEDS CLARIFICATION` and their dependent tasks are BLOCKED**,
 per Constitution Principle II. They are not guesses awaiting confirmation; they
