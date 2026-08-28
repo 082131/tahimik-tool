@@ -1137,12 +1137,19 @@ a plain list of strings, or a list of objects with a `text`/`sentence` field.
 ```python
         sentences = [s for s in sentences if len(s.split()) >= 4]
         sentences = [s for s in sentences if len(s.encode("utf-8")) <= 1024]
+
+        logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")
         return sentences
 ```
-**▸ What this block does:** apply the manuscript's filters — keep sentences with
-at least 4 words and at most 1024 bytes.
-- `len(s.split()) >= 4` — word count ≥ 4.
-- `len(s.encode("utf-8")) <= 1024` — byte length ≤ 1024.
+**▸ What this block does:** apply the manuscript's filters, log the result, and
+return the surviving sentences.
+- `len(s.split()) >= 4` — keep only sentences with word count ≥ 4 (first filter).
+- `len(s.encode("utf-8")) <= 1024` — keep only sentences ≤ 1024 bytes (second
+  filter).
+- `logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")` — a
+  progress log with the final count and source file (e.g.
+  `Loaded 41230 clean sentences from data/clean.txt`). Observability only.
+- `return sentences` — hand back the filtered list of clean sentences.
 
 ### Method `load_gold_standard`
 
@@ -1204,9 +1211,14 @@ each to its list.
 object's fields with the same fallback column names.
 
 ```python
+        logger.info(f"Loaded {len(noisy_texts)} gold standard pairs from {filepath}")
         return noisy_texts, clean_texts
 ```
-**▸ What this block does:** returns the two parallel lists as a tuple `(noisy, clean)`.
+**▸ What this block does:** log the count, then return the two parallel lists.
+- `logger.info(f"Loaded {len(noisy_texts)} gold standard pairs from {filepath}")` —
+  progress log (e.g. `Loaded 15000 gold standard pairs from data/gold.csv`).
+- `return noisy_texts, clean_texts` — hand back both lists as a tuple
+  `(noisy, clean)`, index-aligned.
 
 ### Method `clean_text`
 
@@ -1243,16 +1255,33 @@ size, computing n\* for each.
 
 ```python
     def generate_synthetic_pairs(self, clean_sentences, target_size=1_000_000):
-        noisy_texts = []; clean_texts = []; noise_levels = []
+        noisy_texts = []
+        clean_texts = []
+        noise_levels = []
         passes = max(1, target_size // len(clean_sentences))
         remainder = target_size % len(clean_sentences)
 ```
-**▸ What this block does:** figure out how many full passes over the corpus are
-needed, plus the leftover.
+**▸ What this block does:** start three empty parallel lists, then figure out how
+many full passes over the corpus are needed plus the leftover.
+- `noisy_texts = []` / `clean_texts = []` / `noise_levels = []` — the three output
+  lists, kept in lockstep (same index = same example).
 - `1_000_000` — Python lets you put `_` in numbers for readability (= 1,000,000).
 - `target_size // len(clean_sentences)` — `//` is **integer division**; how many
   whole passes reach the target. `max(1, ...)` ensures at least one pass.
 - `target_size % len(clean_sentences)` — `%` is **modulo**, the leftover count.
+
+```python
+        logger.info(
+            f"Generating ~{target_size} synthetic pairs "
+            f"({passes} passes + {remainder} extra)"
+        )
+```
+**▸ What this block does:** print a progress message (via the shared logger from
+`logging_utils.py`) announcing how much data is about to be generated — e.g.
+`Generating ~1000000 synthetic pairs (25 passes + 12345 extra)`. Purely
+observability; it doesn't change the data.
+- `logger.info(...)` — emit an INFO-level log line.
+- `f"...{passes}...{remainder}..."` — an f-string filling in the computed numbers.
 
 ```python
         for pass_num in range(passes):
@@ -1278,6 +1307,8 @@ files come together.
             noisy_texts.append(noisy)
             clean_texts.append(clean)
             noise_levels.append(n_star)
+
+        logger.info(f"Generated {len(noisy_texts)} synthetic pairs")
         return noisy_texts, clean_texts, noise_levels
 ```
 **▸ What this block does:** the whole-passes loop above lands *just under* the target
@@ -1288,6 +1319,11 @@ same way, then returns the three parallel lists.
 - `min(remainder, len(clean_sentences))` — never ask for more than exist.
 - The loop body is identical to the main loop (make noisy → compute n\* → append to
   all three lists).
+- `logger.info(f"Generated {len(noisy_texts)} synthetic pairs")` — a progress log
+  reporting the final count (e.g. `Generated 1000000 synthetic pairs`).
+  `len(noisy_texts)` is how many pairs ended up in the list. Observability only.
+- `return noisy_texts, clean_texts, noise_levels` — hand back the three parallel
+  lists as a tuple (the caller, usually `preprocessing`/a script, then splits them).
 
 **Worked walkthrough** (tiny numbers)
 ```
@@ -1376,17 +1412,29 @@ tuple of three parallel lists.
                 [clean_texts[i] for i in test_idx],
                 [noise_levels[i] for i in test_idx],
             )
-        return splits
 ```
 **▸ What this block does:** if a test split was requested, everything after `val_end`
 becomes the test set (the held-out data used only for final scoring), gathered the
-same way. Then return the `splits` dict.
+same way.
 - `if test_ratio > 0:` — synthetic data uses no test split (it passes `0.0`), so
   this is skipped for Stage-1 data; gold data passes `0.1`, so it runs.
 - `indices[val_end:]` — all remaining positions.
-- `splits` — a dict keyed `"train"`, `"val"`, and optionally `"test"`, each holding
-  a `(noisy, clean, noise_levels)` tuple — exactly the shape `NormalizationDataset`
-  expects.
+
+```python
+        for split_name, (noisy, clean, nl) in splits.items():
+            logger.info(f"  {split_name}: {len(noisy)} pairs")
+
+        return splits
+```
+**▸ What this block does:** log the size of each split, then return the dict.
+- `splits.items()` — iterate the dict as `(key, value)` pairs; here the value is
+  itself a tuple `(noisy, clean, nl)`, which is **unpacked** inline into three
+  variables in the loop header.
+- `logger.info(f"  {split_name}: {len(noisy)} pairs")` — one line per split, e.g.
+  `train: 12000 pairs`, `val: 1500 pairs`, `test: 1500 pairs`.
+- `return splits` — hand back the dict keyed `"train"`, `"val"`, and optionally
+  `"test"`, each holding a `(noisy, clean, noise_levels)` tuple — exactly the shape
+  `NormalizationDataset` expects.
 
 **Worked walkthrough** (10 examples, 80/10/10)
 ```
