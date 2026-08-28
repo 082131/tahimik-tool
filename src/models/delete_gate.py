@@ -36,6 +36,20 @@ import torch.nn as nn
 from typing import Tuple, Optional
 
 
+def gumbel_noise_like(x: torch.Tensor) -> torch.Tensor:
+    """
+    Sample Gumbel(0, 1) noise shaped like x.
+
+    Adapted from the MrT5 reference implementation (jkallini/mrt5,
+    Apache 2.0) — see ATTRIBUTIONS.md. The epsilon guards the log from
+    underflowing to -inf, and is loosened under fp16 where the smallest
+    representable positive number is much larger.
+    """
+    eps = 3e-4 if x.dtype == torch.float16 else 1e-10
+    uniform = torch.empty_like(x).uniform_(eps, 1 - eps)
+    return -(-uniform.log()).log()
+
+
 class DeleteGate(nn.Module):
     """
     Learned delete gate for byte-level sequence compression.
@@ -57,12 +71,14 @@ class DeleteGate(nn.Module):
         k: float = -30.0,
         noise_adaptive: bool = True,
         noise_avg_momentum: float = 0.99,
+        use_gumbel_noise: bool = True,
     ):
         super().__init__()
 
         self.k = k
         self.noise_adaptive = noise_adaptive
         self.noise_avg_momentum = noise_avg_momentum
+        self.use_gumbel_noise = use_gumbel_noise
 
         # ── Gate scoring layers (Equation 1 from MrT5) ─────────────────
         # G = k * sigmoid(LayerNorm(H) @ W + b)
@@ -120,6 +136,16 @@ class DeleteGate(nn.Module):
         # LayerNorm → Linear → rescaled sigmoid in [k, 0]
         normed = self.layer_norm(hidden_states)
         logits = self.gate_linear(normed)  # (batch, seq, 1)
+
+        # Gumbel noise on the logits during training, from the MrT5 reference
+        # implementation (see ATTRIBUTIONS.md). Keep/delete is close to a
+        # discrete decision, and without perturbation the gate can settle on a
+        # choice early and never sample the alternative hard enough to learn
+        # whether it was better. Training only — inference must be
+        # deterministic, or the same sentence would compress differently on
+        # each call.
+        if self.training and self.use_gumbel_noise:
+            logits = logits + gumbel_noise_like(logits)
 
         # Rescaled sigmoid: k * sigmoid(logits), bounded in [k, 0]
         gate_outputs = self.k * torch.sigmoid(logits)
@@ -204,32 +230,50 @@ class DeleteGate(nn.Module):
             new_attention_mask: Updated attention mask for the compressed seq.
                 Shape: (batch_size, new_seq_len)
         """
-        batch_size = hidden_states.size(0)
-        hidden_dim = hidden_states.size(2)
+        batch_size, seq_len, hidden_dim = hidden_states.shape
+        device = hidden_states.device
 
-        # Find the maximum number of kept tokens across the batch
-        kept_counts = kept_mask.sum(dim=1).long()
-        new_seq_len = kept_counts.max().item()
+        keep = kept_mask.bool()
+        kept_counts = keep.sum(dim=1)
 
-        # Ensure at least 1 token is kept (safety)
-        new_seq_len = max(new_seq_len, 1)
+        # At least one position, so the decoder always receives something even
+        # if the gate deleted an entire sentence.
+        new_seq_len = max(int(kept_counts.max().item()), 1)
 
-        compressed_states = torch.zeros(
-            batch_size, new_seq_len, hidden_dim,
-            device=hidden_states.device, dtype=hidden_states.dtype
+        # Vectorised gather, adapted from the MrT5 reference implementation
+        # (see ATTRIBUTIONS.md). The previous version looped over the batch in
+        # Python. That runs at inference, which is exactly what the efficiency
+        # research question measures, so the loop's overhead landed on the two
+        # compressed variants and understated the very saving they exist to
+        # demonstrate.
+        #
+        # cumsum over the keep mask gives each kept position its destination
+        # index; deleted positions repeat the previous index and contribute a
+        # source index of 0, which scatter_add_ then adds harmlessly.
+        target_pos = (torch.cumsum(keep.long(), dim=1) - 1).clamp(min=0)
+
+        positions = torch.arange(seq_len, device=device).expand(batch_size, -1)
+        positions = positions * keep.long()
+
+        src_positions = torch.zeros(
+            batch_size, new_seq_len, device=device, dtype=torch.long
         )
-        new_attention_mask = torch.zeros(
-            batch_size, new_seq_len,
-            device=hidden_states.device, dtype=kept_mask.dtype
+        src_positions.scatter_add_(1, target_pos, positions)
+
+        compressed_states = torch.gather(
+            hidden_states, 1,
+            src_positions.unsqueeze(-1).expand(-1, -1, hidden_dim),
         )
 
-        for i in range(batch_size):
-            # Gather indices of kept positions
-            kept_indices = kept_mask[i].nonzero(as_tuple=True)[0]
-            n_kept = kept_indices.size(0)
+        # Positions beyond a row's kept count are padding.
+        new_attention_mask = (
+            torch.arange(new_seq_len, device=device).expand(batch_size, -1)
+            < kept_counts.unsqueeze(1)
+        ).to(kept_mask.dtype)
 
-            if n_kept > 0:
-                compressed_states[i, :n_kept] = hidden_states[i, kept_indices]
-                new_attention_mask[i, :n_kept] = 1.0
+        # Zero the padded tail so it carries no stale hidden state.
+        compressed_states = compressed_states * new_attention_mask.unsqueeze(-1).to(
+            compressed_states.dtype
+        )
 
         return compressed_states, new_attention_mask
