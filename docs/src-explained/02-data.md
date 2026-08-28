@@ -576,26 +576,185 @@ example.
 
 ### Function `collate_fn`
 
-**▸ What this function does (whole thing):** the `DataLoader` gathers several
-single-example dicts into a list and hands them here; this stacks matching tensors
-into one **batch** tensor.
+**▸ What this function does (whole thing):** `collate_fn` combines individual
+examples into one **batch** that the model can process at once. A neural network is
+far faster when it processes many sentences together (as one big tensor) than one
+sentence at a time. `__getitem__` (above) produces **one** example at a time; this
+function is the step that glues a handful of them together. The `DataLoader` calls
+it automatically every time it forms a batch — you never call it yourself.
+
+**Variables at a glance**
+| Variable | Type / shape | Holds |
+|---|---|---|
+| `batch` (param) | `list[dict]` | Several single-example dicts from `__getitem__` |
+| (return) | `dict` of tensors | The same fields, but stacked across the batch |
+
+#### Line by line
 
 ```python
 def collate_fn(batch):
+```
+**▸ What this block does:** defines the function. `batch` is the list of individual
+examples the `DataLoader` collected.
+- `batch` — a Python **list**, where each element is one dict exactly like what
+  `__getitem__` returns (`input_ids`, `attention_mask`, `labels`, `noise_level`).
+  If the batch size is 8, this list has 8 dicts.
+
+```python
     return {
+```
+**▸ What this block does:** starts building — and returning — one **new** dictionary.
+It has the same four field names as a single example, but this time each field will
+hold data for the *entire batch* rather than one sentence.
+
+```python
         "input_ids": torch.stack([b["input_ids"] for b in batch]),
+```
+**▸ What this block does:** builds the batched `input_ids` tensor. Read it in two
+parts:
+- `[b["input_ids"] for b in batch]` — a **list comprehension** that loops through
+  every example `b` in the list and pulls out just its `input_ids` tensor,
+  producing a plain list of same-sized 1-D tensors (one per sentence).
+- `torch.stack([...])` — takes that list of same-sized tensors and **stacks** them
+  along a brand-new first dimension, producing a single 2-D tensor. If each
+  `input_ids` was shape `(1024,)` and there are 8 of them, the result is
+  `(8, 1024)`. That new leading `8` is the **batch dimension**.
+
+```python
         "attention_mask": torch.stack([b["attention_mask"] for b in batch]),
+```
+**▸ What this block does:** exactly the same operation for the attention masks —
+collect each example's `attention_mask` and stack them into one `(8, 1024)` tensor,
+so the model knows which positions are real vs padding for every sentence at once.
+
+```python
         "labels": torch.stack([b["labels"] for b in batch]),
+```
+**▸ What this block does:** the same again for the target `labels` (the clean-text
+byte IDs, with padding marked as `-100`). Result shape `(8, 1024)`.
+
+```python
         "noise_level": torch.stack([b["noise_level"] for b in batch]),
+```
+**▸ What this block does:** the same for the noise scores. Each example's
+`noise_level` is a single number (a **scalar** tensor, shape `()`), so stacking 8 of
+them gives a 1-D tensor of shape `(8,)` — one n\* per sentence in the batch.
+
+```python
     }
 ```
-**▸ line notes:**
-- `batch` — a list of the per-example dicts from `__getitem__`.
-- `[b["input_ids"] for b in batch]` — a list comprehension pulling one field out of
-  every example.
-- `torch.stack([...])` — pile those tensors along a **new** first dimension. Eight
-  tensors of shape `(1024,)` become one of shape `(8, 1024)` — i.e. add the batch
-  dimension. The `DataLoader` calls this automatically for each batch.
+**▸ What this block does:** closes and returns the finished batched dictionary. The
+`DataLoader` hands this dict straight to the training loop, which passes its fields
+into the model.
+
+#### Worked walkthrough (batch size 2)
+
+Imagine the `DataLoader` requests a batch size of 2. It first calls `__getitem__()`
+twice, producing this Python list (shortened to length 5 for readability):
+
+```
+batch = [
+    {
+        "input_ids":      tensor([107, 108, 1, 0, 0]),
+        "attention_mask": tensor([1, 1, 1, 0, 0]),
+        "labels":         tensor([107, 108, 1, -100, -100]),
+        "noise_level":    tensor(0.2),
+    },
+    {
+        "input_ids":      tensor([100, 101, 1, 0, 0]),
+        "attention_mask": tensor([1, 1, 1, 0, 0]),
+        "labels":         tensor([100, 101, 1, -100, -100]),
+        "noise_level":    tensor(0.6),
+    },
+]
+```
+
+Each dictionary is one sentence pair. Now trace the code:
+
+`def collate_fn(batch):` — `batch` is that list of two examples.
+
+`return {` — returns one new dictionary where every field holds data for the *whole*
+batch.
+
+`[b["input_ids"] for b in batch]` — loops through each example `b` and collects its
+`input_ids`:
+
+```
+[
+    tensor([107, 108, 1, 0, 0]),
+    tensor([100, 101, 1, 0, 0]),
+]
+```
+
+`torch.stack([...])` — stacks those same-sized tensors into one tensor by adding a
+new first dimension:
+
+```
+tensor([
+    [107, 108, 1, 0, 0],
+    [100, 101, 1, 0, 0],
+])
+```
+
+The shape changes from:
+
+```
+one example:  (5,)
+two examples: (2, 5)
+```
+
+So the line `"input_ids": torch.stack([b["input_ids"] for b in batch]),` creates the
+batch of input token IDs. The remaining lines do exactly the same for the matching
+fields.
+
+`"attention_mask": torch.stack([b["attention_mask"] for b in batch]),` becomes:
+
+```
+tensor([
+    [1, 1, 1, 0, 0],
+    [1, 1, 1, 0, 0],
+])
+```
+
+`"labels": torch.stack([b["labels"] for b in batch]),` becomes:
+
+```
+tensor([
+    [107, 108, 1, -100, -100],
+    [100, 101, 1, -100, -100],
+])
+```
+
+`"noise_level": torch.stack([b["noise_level"] for b in batch]),` combines the scalar
+noise scores:
+
+```
+tensor([0.2, 0.6])
+```
+
+The final output is:
+
+```
+{
+    "input_ids":      tensor of shape (2, 5),
+    "attention_mask": tensor of shape (2, 5),
+    "labels":         tensor of shape (2, 5),
+    "noise_level":    tensor of shape (2,),
+}
+```
+
+With the project's actual configuration — a batch size of 8 and
+`max_input_length = 1024` — the same code gives:
+
+```
+input_ids:      (8, 1024)
+attention_mask: (8, 1024)
+labels:         (8, 1024)   # assuming target length is also 1024
+noise_level:    (8,)
+```
+
+The model then processes all eight examples together, which is much faster than
+training one sentence at a time.
 
 ---
 
