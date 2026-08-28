@@ -255,3 +255,87 @@ def test_noisier_sentences_are_compressed_less(gate, batch):
         f"noisy input was compressed MORE ({rate_noisy.mean():.3f}) than "
         f"clean ({rate_clean.mean():.3f}) — the adaptive shift is inverted"
     )
+
+
+# ── Techniques adopted from the MrT5 reference implementation ─────────────
+#
+# Both of these come from jkallini/mrt5 (Apache 2.0, see ATTRIBUTIONS.md).
+# They were added after the fact rather than test-first, which inverts
+# Constitution Principle IV — recorded rather than hidden.
+
+
+def test_gumbel_noise_perturbs_gate_scores_in_training_only(batch):
+    """
+    The reference implementation adds Gumbel noise to the gate logits during
+    training so the keep/delete decision stays explorable. It must NOT apply
+    at inference: the same sentence has to compress identically on every
+    call, or reported efficiency depends on luck.
+    """
+    hidden, mask, _ = batch
+    gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False, use_gumbel_noise=True)
+
+    gate.train()
+    a = gate(hidden, mask)[0]
+    b = gate(hidden, mask)[0]
+    assert not torch.allclose(a, b), (
+        "gate scores identical across two training passes — Gumbel noise is not applied"
+    )
+
+    gate.eval()
+    c = gate(hidden, mask)[0]
+    d = gate(hidden, mask)[0]
+    assert torch.allclose(c, d), (
+        "gate scores differ between two eval passes — inference is not deterministic"
+    )
+
+
+def test_gumbel_noise_can_be_disabled(batch):
+    """The flag is a config value, not a hardcoded behaviour."""
+    hidden, mask, _ = batch
+    gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False, use_gumbel_noise=False)
+    gate.train()
+
+    a = gate(hidden, mask)[0]
+    b = gate(hidden, mask)[0]
+    assert torch.allclose(a, b), "noise applied despite use_gumbel_noise=False"
+
+
+def test_hard_deletion_keeps_exactly_the_marked_positions(batch):
+    """
+    Hard deletion was rewritten from a Python loop to a vectorised gather,
+    because it runs at inference — which is precisely what the efficiency
+    research question measures. Behaviour must be unchanged: the surviving
+    hidden states are the kept ones, in order, left-packed.
+    """
+    hidden, mask, _ = batch
+    torch.manual_seed(7)
+    kept = ((torch.rand(BATCH, SEQ) > 0.5).float() * mask)
+
+    gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False)
+    compressed, new_mask = gate.apply_hard_deletion(hidden, kept)
+
+    for i in range(BATCH):
+        idx = kept[i].nonzero(as_tuple=True)[0]
+        n = idx.size(0)
+        assert new_mask[i, :n].sum() == n, f"row {i}: mask lost a kept position"
+        assert new_mask[i, n:].sum() == 0, f"row {i}: mask marks padding as real"
+        assert torch.allclose(compressed[i, :n], hidden[i, idx]), (
+            f"row {i}: compressed states are not the kept states in order"
+        )
+
+
+def test_hard_deletion_survives_a_fully_deleted_sentence(batch):
+    """
+    If the gate deletes an entire sentence the decoder must still receive
+    something, or generation has nothing to attend to.
+    """
+    hidden, _, _ = batch
+    kept = torch.zeros(BATCH, SEQ)
+    kept[1, :5] = 1.0          # one row keeps something, the rest keep nothing
+
+    gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False)
+    compressed, new_mask = gate.apply_hard_deletion(hidden, kept)
+
+    assert compressed.size(1) >= 1, "compressed sequence length collapsed to zero"
+    assert new_mask[0].sum() == 0, "an all-deleted row reports surviving positions"
+    assert new_mask[1].sum() == 5, "the row that kept 5 positions did not keep 5"

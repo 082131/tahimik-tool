@@ -71,6 +71,7 @@ class NoiseAdaptiveByT5(nn.Module):
             k=config.gate_k,
             noise_adaptive=True,
             noise_avg_momentum=config.noise_avg_momentum,
+            use_gumbel_noise=getattr(config, "use_gumbel_noise", True),
         )
 
         # Maximum deletion fraction for the noise-adaptive rate target:

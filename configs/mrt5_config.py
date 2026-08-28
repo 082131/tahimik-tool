@@ -39,6 +39,14 @@ class MrT5Config(BaseConfig):
     # that are close to 0 (keep) rather than close to k (delete).
     gate_k: float = -30.0          # Large negative constant bounding the gate
 
+    # ── Gumbel noise on the gate logits (MrT5 reference impl.) ──────────
+    # The reference implementation adds Gumbel noise to the delete-gate
+    # logits during training. It makes the keep/delete decision explorable:
+    # without it the gate can commit early to a decision it then never
+    # revisits, because nothing perturbs the score enough to try the
+    # alternative. Training only — never applied at inference.
+    use_gumbel_noise: bool = True
+
     # ── Rate loss weight ────────────────────────────────────────────────
     w_rate: float = 1.0
 

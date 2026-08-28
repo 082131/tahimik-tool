@@ -56,6 +56,7 @@ class FixedCompressionByT5(nn.Module):
             hidden_dim=hidden_dim,
             k=config.gate_k,
             noise_adaptive=False,
+            use_gumbel_noise=getattr(config, "use_gumbel_noise", True),
         )
 
         # Fixed deletion target for the rate loss

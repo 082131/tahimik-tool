@@ -51,6 +51,14 @@ class TAHIMIKConfig(BaseConfig):
     # the estimator only learns from L_NE.
     noise_avg_momentum: float = 0.99
 
+    # ── Gumbel noise on the gate logits (MrT5 reference impl.) ──────────
+    # The reference implementation adds Gumbel noise to the delete-gate
+    # logits during training. It makes the keep/delete decision explorable:
+    # without it the gate can commit early to a decision it then never
+    # revisits, because nothing perturbs the score enough to try the
+    # alternative. Training only — never applied at inference.
+    use_gumbel_noise: bool = True
+
     # ── Loss weights (from the Loss Computation section) ────────────────
     # L = L_CE + w_rate * L_rate + w_attn_reg * L_attn_reg + L_NE
     w_rate: float = 1.0            # Per-sentence rate loss weight
