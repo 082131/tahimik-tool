@@ -89,12 +89,13 @@ and type hints.
 ABBREVIATION_MAP = {
     "salamat": ["slmt", "slmat", "tnx", "ty"],
     "magandang": ["mgandang", "mgndng"],
-    ...
+    ...   # ~35 entries in total — shown abbreviated here, not an elision of logic
 }
 ```
 **▸ What this block does:** hand-built lookup table of standard Filipino words →
 their common texting abbreviations. This is the human knowledge that makes fake
-noise realistic.
+noise realistic. (The `...` above just means the dictionary continues with more
+word→abbreviation entries; it's *data*, not skipped code.)
 - `ABBREVIATION_MAP` — a **dictionary** (`dict`). Each **key** (e.g. `"salamat"`)
   maps to a **value** that is a list of possible abbreviated forms.
 - Written in `UPPER_CASE` because it's a module-level constant (a fixed table).
