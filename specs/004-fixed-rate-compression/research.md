@@ -22,6 +22,48 @@ to compare against.
 (below) from "a choice" into "a defect or an undeclared deviation". It cannot be
 both a replication and a modification.
 
+## An official MrT5 release exists, and this repo does not use it
+
+**Fact, recorded because it changes what a reviewer can ask.**
+
+MrT5 has both an official code repository
+([github.com/jkallini/mrt5](https://github.com/jkallini/mrt5)) and a released
+pretrained checkpoint on HuggingFace
+([`stanfordnlp/mrt5-small`](https://huggingface.co/stanfordnlp/mrt5-small),
+~1.2GB safetensors with a custom model implementation).
+
+The released checkpoint's configuration is close to this repo's: trained at
+deletion rate **δ = 0.5**, deleting after the **third** encoder layer. Those
+match `fixed_deletion_target = 0.5` and `delete_gate_layer = 3` in
+`configs/mrt5_config.py`.
+
+This repository uses neither. `src/models/delete_gate.py` is written from the
+paper using only `torch` and `torch.nn`; no MrT5 package is imported or
+installed.
+
+**Why reimplementing is defensible** — the decisive reason first:
+
+1. **Control variables.** `stanfordnlp/mrt5-small` was produced by multilingual
+   continued pretraining, not by this study's two-stage schedule on
+   Tagalog/Taglish data. The manuscript fixes *"the training data, the
+   train/validation/test partitioning, the model hyperparameters, and the
+   hardware"* across all three variants. Dropping in a checkpoint carrying
+   someone else's pretraining would break exactly the condition that makes the
+   comparison fair — it would compare "MrT5 trained on their corpus" against
+   "TAHIMIK trained on ours".
+2. **TAHIMIK extends the same gate.** The noise-adaptive shift is added to this
+   gate implementation. Extending code the project owns is simpler and safer
+   than modifying a third-party model class.
+
+**Why it is still a liability**: a reimplementation must be shown faithful,
+whereas a library would inherit that. The `L_attn_reg` deviation below is
+precisely the kind of gap that carries. The released checkpoint offers a way to
+close it — see the validation task.
+
+**Recorded so it is not discovered by a reviewer first**: the manuscript should
+state that an official release exists and why it was not used. Silence on this
+reads as not having known.
+
 ## OPEN: the attention regulariser substitutes for MrT5 Appendix D
 
 **Status**: Unresolved. **Author decision required — this is a manuscript

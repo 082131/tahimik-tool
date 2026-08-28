@@ -90,6 +90,9 @@ inline explanation of why the intuitive alternative silently breaks training.
 - [ ] T017 [P] Remove the dead `encoder_outputs = (hidden_states,)` assignment at `src/models/fixed_compression_byt5.py:176` — assigned, never read (partial)
 - [ ] T018 [P] Write the noise-blindness test from T003 if T001's audit confirms no existing test covers it (missing)
 
+- [ ] T019 **HIGH** Add a paragraph to the manuscript stating that an official MrT5 release exists ([`stanfordnlp/mrt5-small`](https://huggingface.co/stanfordnlp/mrt5-small)) and why this study reimplements rather than uses it — the control-variable argument in `research.md`. Currently the manuscript is silent, which reads as not having known (missing)
+- [ ] T020 Validate the reimplementation against the reference: run `stanfordnlp/mrt5-small` and this repo's gate on identical input and compare deletion behaviour at δ=0.5, layer 3. This is the strongest available answer to "how do you know your MrT5 is faithful?", which currently has no evidence behind it beyond following the paper (missing)
+
 **Checkpoint**: After T015–T018, run `/speckit-analyze`.
 
 ---
