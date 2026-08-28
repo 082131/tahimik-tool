@@ -14,6 +14,11 @@ Filipino social media text is full of abbreviations (*slmt* for *salamat*), char
 
 **Core insight:** not all sentences are equally noisy. A clean sentence can be aggressively compressed (deleting redundant bytes) for efficiency, while a noisy sentence should be preserved in full so the decoder has enough information to correct errors. TAHIMIK learns to estimate noise and adjust compression accordingly.
 
+**Model size**: `configs/base.py` currently pins `google/byt5-small` as a
+development default. The manuscript specifies the **base** variant for the
+actual experiments. See [`specs/FINDINGS.md`](specs/FINDINGS.md) item 4 — no
+reported result may come from a `small` run without stating the divergence.
+
 ### Three Models Compared Under Identical Conditions
 
 | Variant | Compression | Purpose |
@@ -23,6 +28,48 @@ Filipino social media text is full of abbreviations (*slmt* for *salamat*), char
 | **TAHIMIK (Proposed)** | Noise-adaptive deletion | Best of both worlds |
 
 Same data, same optimizer, same schedule — only the compression mechanism changes.
+
+---
+
+## Project Status
+
+**The implementation is complete; the study is not.** All three variants, the
+training pipeline, the evaluation harness, and the demo tool are written and
+tested. What does not exist yet:
+
+| | State |
+|---|---|
+| Gold-standard dataset | Not collected — the annotation platform is still in development |
+| Trained checkpoints | None. Every run today is synthetic-only (Stage 1) |
+| Results | None. No research question is answered yet |
+| Demo tool | Returns HTTP 503 until a checkpoint exists |
+
+Anything depending on real Tagalog/Taglish data is **blocked, not skipped** —
+each spec separates what is verifiable now from what needs the dataset.
+
+---
+
+## How This Repository Works
+
+Components are specified before they are built, and existing code is retrofitted
+with specs that describe what it *should* do — written without reading the
+implementation, so the spec can catch a bug rather than agree with it.
+
+Start here:
+
+| Read | For |
+|------|-----|
+| [`specs/FINDINGS.md`](specs/FINDINGS.md) | Every known gap between the manuscript and the code, severity-ordered |
+| [`docs/PROCESS.md`](docs/PROCESS.md) | How the spec loop works and what it has caught |
+| [`docs/WHY.md`](docs/WHY.md) | Plain-language reasoning behind each project rule |
+| [`.specify/memory/constitution.md`](.specify/memory/constitution.md) | The five ratified principles everything answers to |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Branching, commits, PRs, review |
+
+`specs/00N-<name>/` holds one directory per component, each with a spec, the
+research behind it, a plan, and tasks.
+
+**Before "fixing" something that looks wrong, check `FINDINGS.md`** — it may
+already be recorded and awaiting a decision.
 
 ---
 
@@ -79,6 +126,21 @@ tahimik/
 │   ├── benchmark.py             # Efficiency benchmarking
 │   └── run_experiment.py        # Full pipeline: all 3 variants
 │
+├── specs/                       # One directory per component
+│   ├── FINDINGS.md              # Known manuscript/code divergences
+│   ├── PROVENANCE.md            # How each spec was produced
+│   └── 00N-<name>/              # spec, research, plan, tasks per feature
+│
+├── docs/
+│   ├── PROCESS.md               # How the spec loop works
+│   ├── SPEC-WORKFLOW.md         # The loop, step by step
+│   └── WHY.md                   # Plain-language reasoning behind each rule
+│
+├── .specify/
+│   └── memory/constitution.md   # Ratified project principles (v1.0.0)
+│
+├── CONTRIBUTING.md              # Branching, commits, PRs, review
+├── CLAUDE.md                    # Instructions for AI assistants
 ├── requirements.txt
 └── .gitignore
 ```
@@ -157,13 +219,28 @@ L = L_CE + w_rate · L_rate + w_attn_reg · L_attn_reg + L_NE
 - **Peak GPU memory** — `torch.cuda.max_memory_allocated()`
 
 ### Statistical Significance
-- **Paired bootstrap resampling** — 1000 samples, for accuracy metrics
-- **Wilcoxon signed-rank** — For GPU memory (non-parametric)
-- **Holm-Bonferroni correction** — Controls family-wise error rate across all pairwise tests
+- **Paired bootstrap resampling** — 1000 samples, two-tailed, for accuracy
+  metrics *and* per-sentence inference time
+- **Wilcoxon signed-rank** — For peak GPU memory only, which is measured once
+  per run and therefore cannot be resampled at the sentence level
+- **Holm-Bonferroni correction** — Controls family-wise error rate across the
+  comparison family
+
+Significance requires **both** `p < 0.05` **and** a confidence interval
+excluding zero.
+
+> The implementation currently diverges from this on two counts — see
+> [`specs/FINDINGS.md`](specs/FINDINGS.md) items 1 and 2. Fix before reporting
+> any result as significant.
 
 ---
 
 ## Quick Start
+
+> **The commands below reference files that do not exist yet.**
+> `data/gold.csv` requires the gold-standard dataset, and the checkpoint paths
+> require a completed training run. Only the synthetic (Stage 1) path is
+> runnable today — see [Project Status](#project-status).
 
 ### Install dependencies
 
