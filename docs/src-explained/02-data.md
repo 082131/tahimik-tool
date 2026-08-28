@@ -19,8 +19,11 @@ preprocessing.py  (the conductor)
                                           └── consumed by src/training + src/evaluation
 ```
 
-> **Format reminder:** each code block starts with **▸ What this block does**
-> (group summary), then breaks down every line, variable, and technical term.
+> **Format reminder:** every line of code is covered individually. Each block opens
+> with **▸ What this block does**, then explains every line, variable, and technical
+> term in full (never compressed). Distinct functions also get a **Worked
+> walkthrough** tracing concrete values through the code; near-identical repeats get
+> a short "same as X, but…" example.
 
 ---
 
@@ -86,12 +89,13 @@ and type hints.
 ABBREVIATION_MAP = {
     "salamat": ["slmt", "slmat", "tnx", "ty"],
     "magandang": ["mgandang", "mgndng"],
-    ...
+    ...   # ~35 entries in total — shown abbreviated here, not an elision of logic
 }
 ```
 **▸ What this block does:** hand-built lookup table of standard Filipino words →
 their common texting abbreviations. This is the human knowledge that makes fake
-noise realistic.
+noise realistic. (The `...` above just means the dictionary continues with more
+word→abbreviation entries; it's *data*, not skipped code.)
 - `ABBREVIATION_MAP` — a **dictionary** (`dict`). Each **key** (e.g. `"salamat"`)
   maps to a **value** that is a list of possible abbreviated forms.
 - Written in `UPPER_CASE` because it's a module-level constant (a fixed table).
@@ -172,14 +176,90 @@ each step below may modify it.
 ```python
         if self.rng.random() < self.p_vowel_omission:
             noisy = self._apply_vowel_omission(noisy)
+```
+**▸ What this block does:** with ~20% probability, drop interior vowels from some
+words (`punta` → `pnta`).
+- `self.rng.random() < self.p_vowel_omission` — a fresh dice roll, 20% chance.
+- `self._apply_vowel_omission(noisy)` — run that helper on the *current* `noisy`
+  (which may already have abbreviations applied from the block above), storing the
+  result back into `noisy`.
+
+```python
         if self.rng.random() < self.p_orthographic:
             noisy = self._apply_orthographic_variation(noisy)
-        ... (elongation, punctuation, capitalization, slang, emoji, char_swap) ...
+```
+**▸ What this block does:** with ~20% probability, apply phonetic/number spellings
+(`dito` → `d2`). Same dice-roll-then-helper pattern.
+
+```python
+        if self.rng.random() < self.p_elongation:
+            noisy = self._apply_elongation(noisy)
+```
+**▸ What this block does:** with ~15% probability, stretch letters for emphasis
+(`grabe` → `grabeeee`).
+
+```python
+        if self.rng.random() < self.p_punctuation:
+            noisy = self._apply_punctuation_noise(noisy)
+```
+**▸ What this block does:** with ~15% probability, mangle punctuation (`!` → `!!!!`,
+or remove it).
+
+```python
+        if self.rng.random() < self.p_capitalization:
+            noisy = self._apply_capitalization_noise(noisy)
+```
+**▸ What this block does:** with ~15% probability, mess up capitalization (random
+CAPS, ALL CAPS, or all lowercase).
+
+```python
+        if self.rng.random() < self.p_slang:
+            noisy = self._apply_slang(noisy)
+```
+**▸ What this block does:** with ~10% probability, swap words for slang (`idol` →
+`lodi`).
+
+```python
+        if self.rng.random() < self.p_emoji_insert:
+            noisy = self._apply_emoji_insert(noisy)
+```
+**▸ What this block does:** with ~10% probability, insert an emoji somewhere.
+
+```python
+        if self.rng.random() < self.p_char_swap:
+            noisy = self._apply_char_swap(noisy)
+```
+**▸ What this block does:** with ~10% probability, swap two adjacent letters to
+simulate a typo (`ang` → `nag`).
+
+```python
         return noisy
 ```
-**▸ What this block does:** the same dice-roll pattern for the other 8 categories,
-each calling its own helper, then returns the final noisy text. Stacking them is
-what produces layered, realistic noise.
+**▸ What this block does:** returns the final text after all the dice rolls. Because
+each `if` was independent, `noisy` may have accumulated several kinds of corruption
+— which is exactly the layered noise real posts have.
+
+**Worked walkthrough** (one call, seeded)
+```
+apply_noise("Salamat idol grabe")
+
+start:  noisy = "Salamat idol grabe"
+
+roll 1 (abbreviation, <0.30?)  → hits → "slmt idol grabe"
+roll 2 (vowel omission, <0.20?)→ misses → unchanged
+roll 3 (orthographic, <0.20?)  → misses → unchanged
+roll 4 (elongation, <0.15?)    → hits → "slmt idol grabeeee"
+roll 5 (punctuation, <0.15?)   → misses
+roll 6 (capitalization, <0.15?)→ misses
+roll 7 (slang, <0.10?)         → hits → "slmt lodi grabeeee"
+roll 8 (emoji, <0.10?)         → misses
+roll 9 (char swap, <0.10?)     → misses
+
+returns "slmt lodi grabeeee"
+# paired with the clean "Salamat idol grabe" → one training example
+```
+(The exact rolls depend on the seed; this shows how corruptions *stack* across the
+independent checks.)
 
 ### Helper `_apply_abbreviation`
 
@@ -242,22 +322,68 @@ sentence.
   with the abbreviation plus its punctuation.
 - `" ".join(words)` — glue the word list back into one string with spaces between.
 
-> The remaining helpers follow the **same shape** (split → loop → maybe transform →
-> re-join), each doing one kind of corruption:
-> - `_apply_vowel_omission` — drops interior vowels (keeps the first letter; skips
->   short words). Uses `if ch in VOWELS`.
-> - `_apply_orthographic_variation` — dictionary swap to phonetic/number spellings.
-> - `_apply_elongation` — repeats a vowel near the end (`grabe`→`grabeeee`);
->   `self.rng.randint(2, 5)` picks how many repeats (`randint(a,b)` = random whole
->   number between a and b inclusive).
-> - `_apply_punctuation_noise` — uses `re.sub(pattern, repl, text)` to multiply or
->   remove punctuation.
-> - `_apply_capitalization_noise` — random CAPS / ALLCAPS / lowercase.
-> - `_apply_slang` — dictionary swap to slang forms.
-> - `_apply_emoji_insert` — inserts an emoji at start/end/middle;
->   `self.rng.choice(pool)` picks which.
-> - `_apply_char_swap` — swaps two adjacent letters (a typo);
->   `chars[pos], chars[pos+1] = chars[pos+1], chars[pos]` is Python's one-line swap.
+### The other 8 helper methods
+
+All follow the **same shape as `_apply_abbreviation`** above — *split the sentence
+into words (or characters), loop, maybe transform, re-join* — so rather than repeat
+that structure eight times, here is each one with the one thing that makes it
+different and a short worked example. (This is the "brief for repeats" treatment;
+`_apply_abbreviation` above is the full pattern.)
+
+**`_apply_vowel_omission`** — drops interior vowels from a word to mimic texting.
+Keeps the first letter, skips short words (≤3 chars), and only drops each vowel with
+some probability (`if ch in VOWELS and self.rng.random() < 0.6`).
+```
+"punta"  → keep "p", drop some of "u/a" → "pnta"
+"gabi"   → "gbi"
+```
+
+**`_apply_orthographic_variation`** — dictionary swap (like abbreviation, but using
+`ORTHO_SUBSTITUTIONS`) for phonetic/number spellings.
+```
+"dito"  → "d2"   ;   "hindi" → "hnd"
+```
+
+**`_apply_elongation`** — repeats a vowel near the end of a word for emphasis. The
+count comes from `self.rng.randint(2, 5)` (`randint(a, b)` = a random whole number
+from a to b **inclusive**).
+```
+"grabe" → repeat the last vowel 4× → "grabeeee"
+"sarap" → "saraaap"
+```
+
+**`_apply_punctuation_noise`** — uses `re.sub(pattern, repl, text)` (regex
+find-replace) to either multiply terminal punctuation, remove some, or turn `.`
+into `...`.
+```
+"grabe!"  → "grabe!!!!!"
+"tama."    → "tama..."
+```
+
+**`_apply_capitalization_noise`** — randomly chooses one of three styles: sprinkle
+random CAPS, ALL-CAPS a word or two, or lowercase everything.
+```
+"grabe naman" → "GRABE naman"   (allcaps on one word)
+"Grabe Naman" → "grabe naman"   (nocaps)
+```
+
+**`_apply_slang`** — dictionary swap using `SLANG_MAP`.
+```
+"idol"    → "lodi"   ;   "grabe" → "grabiii"
+```
+
+**`_apply_emoji_insert`** — picks one emoji with `self.rng.choice(pool)` and inserts
+it at the start, end, or middle.
+```
+"late na ako"  → "late na ako 😭"
+```
+
+**`_apply_char_swap`** — swaps two adjacent alphabetic characters to simulate a
+typo. The swap itself is Python's one-line tuple swap:
+`chars[pos], chars[pos+1] = chars[pos+1], chars[pos]`.
+```
+"ang"  → swap positions 0,1 → "nag"
+```
 
 ### Method `generate_batch`
 
@@ -265,29 +391,83 @@ sentence.
 from a list of clean sentences, retrying if the dice happened to change nothing
 (so you never train on a useless identical pair).
 
+**Variables at a glance**
+| Variable | Type | Holds |
+|---|---|---|
+| `clean_sentences` (param) | `list[str]` | Clean sentences to corrupt |
+| `noise_per_sentence` (param) | `int` (default 1) | How many noisy variants per clean sentence |
+| `pairs` | `list[tuple]` | The `(noisy, clean)` results |
+| `clean` | `str` | Current clean sentence (outer loop) |
+| `noisy` / `noisy_retry` | `str` | A generated noisy version |
+
 ```python
     def generate_batch(self, clean_sentences, noise_per_sentence=1):
         pairs = []
+```
+**▸ What this block does:** starts an empty list that will collect the finished
+`(noisy, clean)` pairs.
+- `pairs` — a Python list; each element will be a **tuple** `(noisy, clean)`.
+
+```python
         for clean in clean_sentences:
+```
+**▸ What this block does:** loops over every clean sentence you passed in.
+- `clean` — the current clean sentence being corrupted.
+
+```python
             for _ in range(noise_per_sentence):
+```
+**▸ What this block does:** repeats the corruption `noise_per_sentence` times, so
+you can make several different noisy versions of the *same* clean sentence.
+- `range(noise_per_sentence)` — counts from 0 up to that number.
+- `_` — a throwaway loop variable; the underscore signals "I don't use the count,
+  I just want to repeat this many times."
+
+```python
                 noisy = self.apply_noise(clean)
+```
+**▸ What this block does:** produce one noisy version of the current clean sentence
+by calling `apply_noise` (the method above).
+
+```python
                 if noisy != clean:
                     pairs.append((noisy, clean))
+```
+**▸ What this block does:** if the noise actually changed the text, keep the pair.
+- `noisy != clean` — "did anything change?" (all the dice rolls could have missed).
+- `pairs.append((noisy, clean))` — add the tuple to the results list.
+
+```python
                 else:
                     noisy_retry = self.apply_noise(clean)
                     pairs.append((noisy_retry, clean))
+```
+**▸ What this block does:** if nothing changed, **retry once** and keep whatever
+that produces — so you never store a useless `(clean, clean)` pair that teaches the
+model nothing.
+- `noisy_retry` — a second attempt (a fresh set of dice rolls).
+- `pairs.append((noisy_retry, clean))` — store it regardless (even if the retry also
+  changed nothing, one such pair is harmless).
+
+```python
         return pairs
 ```
-**▸ line notes:**
-- `pairs = []` — the output list of `(noisy, clean)` tuples.
-- `for clean in clean_sentences:` — loop over each clean sentence.
-- `for _ in range(noise_per_sentence):` — repeat `noise_per_sentence` times. `_` is
-  a throwaway loop variable (we don't use the count).
-- `noisy = self.apply_noise(clean)` — make a noisy version.
-- `if noisy != clean:` — if noise actually changed something, keep the pair.
-- `else: ... apply_noise(clean)` again — otherwise **retry once** so the pair is
-  non-trivial. `pairs.append((noisy, clean))` adds the tuple to the list.
-- `return pairs` — the finished list.
+**▸ What this block does:** returns the full list of pairs.
+
+**Worked walkthrough**
+```
+generate_batch(["Salamat idol", "Kumain ka na"], noise_per_sentence=2)
+
+"Salamat idol":
+  attempt 1 → "slmt idol"   (changed → keep)          pairs += ("slmt idol", "Salamat idol")
+  attempt 2 → "Salamat lodi"(changed → keep)          pairs += ("Salamat lodi", "Salamat idol")
+"Kumain ka na":
+  attempt 1 → "Kumain ka na"(no change → retry once)
+             retry → "kumain ka na" (keep the retry)  pairs += ("kumain ka na", "Kumain ka na")
+  attempt 2 → "kmain ka na" (changed → keep)           pairs += ("kmain ka na", "Kumain ka na")
+
+returns 4 pairs (2 per clean sentence)
+```
 
 ---
 
@@ -372,6 +552,29 @@ scales that into [0,1].
 - `distance / max_len` — divide by the longer length → a `float` in [0,1]. Because
   the clean text *is* the reference, this ratio literally **is** the fraction of
   the sentence that was noise. That's why no human has to label noise.
+
+**Worked walkthrough**
+```
+compute_noise_level("grabeee", "grabe")
+
+noisy_bytes = list("grabeee".encode("utf-8"))
+            = [103, 114, 97, 98, 101, 101, 101]   # g r a b e e e  → length 7
+clean_bytes = list("grabe".encode("utf-8"))
+            = [103, 114, 97, 98, 101]             # g r a b e      → length 5
+
+max_len = max(7, 5) = 7
+max_len == 0?  no → continue
+
+distance = editdistance.eval(noisy_bytes, clean_bytes)
+         = 2        # delete the 2 extra "e" bytes to turn "grabeee" into "grabe"
+
+return distance / max_len
+     = 2 / 7
+     ≈ 0.286        # ~29% of the sentence was noise
+```
+Contrast: `compute_noise_level("grabe", "grabe")` → distance `0` → `0 / 5 = 0.0`
+(no noise). So a small n\* = clean, a large n\* = heavily corrupted — the exact
+signal the noise estimator learns to reproduce.
 
 ---
 
@@ -542,9 +745,15 @@ fixed length.
   `attention_mask` (1=real, 0=pad).
 
 ```python
-        target_encoding = self.tokenizer(clean, ...)
+        target_encoding = self.tokenizer(
+            clean, max_length=self.max_target_length,
+            padding="max_length", truncation=True, return_tensors="pt",
+        )
 ```
-**▸ What this block does:** the same tokenization for the clean target sentence.
+**▸ What this block does:** the exact same tokenization, but for the **clean target**
+sentence (the answer the model should produce), using `max_target_length`. Result
+`target_encoding` is a dict with the target's `input_ids` and `attention_mask`; only
+its `input_ids` are used below (as the `labels`).
 
 ```python
         labels = target_encoding["input_ids"].squeeze()
@@ -574,28 +783,217 @@ example.
 - `torch.tensor(self.noise_levels[idx], dtype=torch.float32)` — wrap the plain
   float n\* into a tensor. `dtype=torch.float32` = 32-bit decimal type.
 
+**Worked walkthrough** (fetching one example, shortened to length 5 for readability)
+```
+ds = NormalizationDataset(["slmt", "d2"], ["salamat", "dito"], tokenizer)
+ds[0]                       # idx = 0
+
+noisy = self.noisy_texts[0] = "slmt"
+clean = self.clean_texts[0] = "salamat"
+
+input_encoding = tokenizer("slmt", ...)
+  input_encoding["input_ids"]      = tensor([[118, 111, 112, 119, 1]])   shape (1, 5)
+  input_encoding["attention_mask"] = tensor([[1, 1, 1, 1, 1]])
+
+target_encoding = tokenizer("salamat", ...)
+  target_encoding["input_ids"]     = tensor([[118, 100, 111, 100, 1]])   shape (1, 5)
+
+labels = target_encoding["input_ids"].squeeze()   = tensor([118, 100, 111, 100, 1])
+# (no padding here, so no positions become -100; if it were padded,
+#  those pad IDs would be replaced with -100)
+
+returns {
+  "input_ids":      tensor([118, 111, 112, 119, 1]),   # .squeeze() → shape (5,)
+  "attention_mask": tensor([1, 1, 1, 1, 1]),
+  "labels":         tensor([118, 100, 111, 100, 1]),
+  "noise_level":    tensor(0.57),                       # n* for ("slmt","salamat")
+}
+```
+(The byte-ID numbers are illustrative. In the real project everything is padded to
+1024, so each tensor above would be shape `(1024,)` with the tail filled by pad-IDs
+in `input_ids`/`attention_mask` and by `-100` in `labels`.)
+
 ### Function `collate_fn`
 
-**▸ What this function does (whole thing):** the `DataLoader` gathers several
-single-example dicts into a list and hands them here; this stacks matching tensors
-into one **batch** tensor.
+**▸ What this function does (whole thing):** `collate_fn` combines individual
+examples into one **batch** that the model can process at once. A neural network is
+far faster when it processes many sentences together (as one big tensor) than one
+sentence at a time. `__getitem__` (above) produces **one** example at a time; this
+function is the step that glues a handful of them together. The `DataLoader` calls
+it automatically every time it forms a batch — you never call it yourself.
+
+**Variables at a glance**
+| Variable | Type / shape | Holds |
+|---|---|---|
+| `batch` (param) | `list[dict]` | Several single-example dicts from `__getitem__` |
+| (return) | `dict` of tensors | The same fields, but stacked across the batch |
+
+#### Line by line
 
 ```python
 def collate_fn(batch):
+```
+**▸ What this block does:** defines the function. `batch` is the list of individual
+examples the `DataLoader` collected.
+- `batch` — a Python **list**, where each element is one dict exactly like what
+  `__getitem__` returns (`input_ids`, `attention_mask`, `labels`, `noise_level`).
+  If the batch size is 8, this list has 8 dicts.
+
+```python
     return {
+```
+**▸ What this block does:** starts building — and returning — one **new** dictionary.
+It has the same four field names as a single example, but this time each field will
+hold data for the *entire batch* rather than one sentence.
+
+```python
         "input_ids": torch.stack([b["input_ids"] for b in batch]),
+```
+**▸ What this block does:** builds the batched `input_ids` tensor. Read it in two
+parts:
+- `[b["input_ids"] for b in batch]` — a **list comprehension** that loops through
+  every example `b` in the list and pulls out just its `input_ids` tensor,
+  producing a plain list of same-sized 1-D tensors (one per sentence).
+- `torch.stack([...])` — takes that list of same-sized tensors and **stacks** them
+  along a brand-new first dimension, producing a single 2-D tensor. If each
+  `input_ids` was shape `(1024,)` and there are 8 of them, the result is
+  `(8, 1024)`. That new leading `8` is the **batch dimension**.
+
+```python
         "attention_mask": torch.stack([b["attention_mask"] for b in batch]),
+```
+**▸ What this block does:** exactly the same operation for the attention masks —
+collect each example's `attention_mask` and stack them into one `(8, 1024)` tensor,
+so the model knows which positions are real vs padding for every sentence at once.
+
+```python
         "labels": torch.stack([b["labels"] for b in batch]),
+```
+**▸ What this block does:** the same again for the target `labels` (the clean-text
+byte IDs, with padding marked as `-100`). Result shape `(8, 1024)`.
+
+```python
         "noise_level": torch.stack([b["noise_level"] for b in batch]),
+```
+**▸ What this block does:** the same for the noise scores. Each example's
+`noise_level` is a single number (a **scalar** tensor, shape `()`), so stacking 8 of
+them gives a 1-D tensor of shape `(8,)` — one n\* per sentence in the batch.
+
+```python
     }
 ```
-**▸ line notes:**
-- `batch` — a list of the per-example dicts from `__getitem__`.
-- `[b["input_ids"] for b in batch]` — a list comprehension pulling one field out of
-  every example.
-- `torch.stack([...])` — pile those tensors along a **new** first dimension. Eight
-  tensors of shape `(1024,)` become one of shape `(8, 1024)` — i.e. add the batch
-  dimension. The `DataLoader` calls this automatically for each batch.
+**▸ What this block does:** closes and returns the finished batched dictionary. The
+`DataLoader` hands this dict straight to the training loop, which passes its fields
+into the model.
+
+#### Worked walkthrough (batch size 2)
+
+Imagine the `DataLoader` requests a batch size of 2. It first calls `__getitem__()`
+twice, producing this Python list (shortened to length 5 for readability):
+
+```
+batch = [
+    {
+        "input_ids":      tensor([107, 108, 1, 0, 0]),
+        "attention_mask": tensor([1, 1, 1, 0, 0]),
+        "labels":         tensor([107, 108, 1, -100, -100]),
+        "noise_level":    tensor(0.2),
+    },
+    {
+        "input_ids":      tensor([100, 101, 1, 0, 0]),
+        "attention_mask": tensor([1, 1, 1, 0, 0]),
+        "labels":         tensor([100, 101, 1, -100, -100]),
+        "noise_level":    tensor(0.6),
+    },
+]
+```
+
+Each dictionary is one sentence pair. Now trace the code:
+
+`def collate_fn(batch):` — `batch` is that list of two examples.
+
+`return {` — returns one new dictionary where every field holds data for the *whole*
+batch.
+
+`[b["input_ids"] for b in batch]` — loops through each example `b` and collects its
+`input_ids`:
+
+```
+[
+    tensor([107, 108, 1, 0, 0]),
+    tensor([100, 101, 1, 0, 0]),
+]
+```
+
+`torch.stack([...])` — stacks those same-sized tensors into one tensor by adding a
+new first dimension:
+
+```
+tensor([
+    [107, 108, 1, 0, 0],
+    [100, 101, 1, 0, 0],
+])
+```
+
+The shape changes from:
+
+```
+one example:  (5,)
+two examples: (2, 5)
+```
+
+So the line `"input_ids": torch.stack([b["input_ids"] for b in batch]),` creates the
+batch of input token IDs. The remaining lines do exactly the same for the matching
+fields.
+
+`"attention_mask": torch.stack([b["attention_mask"] for b in batch]),` becomes:
+
+```
+tensor([
+    [1, 1, 1, 0, 0],
+    [1, 1, 1, 0, 0],
+])
+```
+
+`"labels": torch.stack([b["labels"] for b in batch]),` becomes:
+
+```
+tensor([
+    [107, 108, 1, -100, -100],
+    [100, 101, 1, -100, -100],
+])
+```
+
+`"noise_level": torch.stack([b["noise_level"] for b in batch]),` combines the scalar
+noise scores:
+
+```
+tensor([0.2, 0.6])
+```
+
+The final output is:
+
+```
+{
+    "input_ids":      tensor of shape (2, 5),
+    "attention_mask": tensor of shape (2, 5),
+    "labels":         tensor of shape (2, 5),
+    "noise_level":    tensor of shape (2,),
+}
+```
+
+With the project's actual configuration — a batch size of 8 and
+`max_input_length = 1024` — the same code gives:
+
+```
+input_ids:      (8, 1024)
+attention_mask: (8, 1024)
+labels:         (8, 1024)   # assuming target length is also 1024
+noise_level:    (8,)
+```
+
+The model then processes all eight examples together, which is much faster than
+training one sentence at a time.
 
 ---
 
@@ -700,43 +1098,154 @@ non-blank lines.
                     text = row.get("text", row.get("sentence", "")).strip()
                     if text:
                         sentences.append(text)
-        elif path.suffix == ".json":
-            ...
 ```
-**▸ What this block does:** for CSV, read each row as a dictionary and pull the
-`text` (or `sentence`) column; for JSON, handle a list of strings or objects.
-- `csv.DictReader(f)` — reads rows as dicts keyed by the header names.
-- `row.get("text", row.get("sentence", ""))` — try the `"text"` column; if missing,
-  try `"sentence"`; if that's missing too, use `""`. `.get(key, default)` avoids a
-  crash on a missing key.
+**▸ What this block does:** for a CSV file, read each row as a dictionary and pull
+out the sentence text.
+- `csv.DictReader(f)` — reads the file's rows as dicts keyed by the header names
+  (so `row["text"]` works).
+- `for row in reader:` — loop over every row.
+- `row.get("text", row.get("sentence", ""))` — try the `"text"` column; if it's
+  missing, try `"sentence"`; if that's missing too, use `""`. `.get(key, default)`
+  avoids a crash when a column doesn't exist.
+- `.strip()` — trim surrounding whitespace.
+- `if text: sentences.append(text)` — keep only non-empty text.
+
+```python
+        elif path.suffix == ".json":
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, str):
+                        sentences.append(item.strip())
+                    elif isinstance(item, dict):
+                        text = item.get("text", item.get("sentence", ""))
+                        if text:
+                            sentences.append(text.strip())
+```
+**▸ What this block does:** for a JSON file, load it and handle two possible shapes —
+a plain list of strings, or a list of objects with a `text`/`sentence` field.
+- `json.load(f)` — parse the file into Python objects (lists/dicts).
+- `isinstance(data, list)` — check the top level is a list (`isinstance(x, T)` = "is
+  `x` of type `T`?").
+- `for item in data:` — loop over each entry.
+- `if isinstance(item, str):` — if the entry is already a plain string, keep it
+  (stripped).
+- `elif isinstance(item, dict):` — otherwise if it's an object, pull its
+  `text`/`sentence` field the same way as the CSV branch, and keep it if non-empty.
 
 ```python
         sentences = [s for s in sentences if len(s.split()) >= 4]
         sentences = [s for s in sentences if len(s.encode("utf-8")) <= 1024]
+
+        logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")
         return sentences
 ```
-**▸ What this block does:** apply the manuscript's filters — keep sentences with
-at least 4 words and at most 1024 bytes.
-- `len(s.split()) >= 4` — word count ≥ 4.
-- `len(s.encode("utf-8")) <= 1024` — byte length ≤ 1024.
+**▸ What this block does:** apply the manuscript's filters, log the result, and
+return the surviving sentences.
+- `len(s.split()) >= 4` — keep only sentences with word count ≥ 4 (first filter).
+- `len(s.encode("utf-8")) <= 1024` — keep only sentences ≤ 1024 bytes (second
+  filter).
+- `logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")` — a
+  progress log with the final count and source file (e.g.
+  `Loaded 41230 clean sentences from data/clean.txt`). Observability only.
+- `return sentences` — hand back the filtered list of clean sentences.
 
 ### Method `load_gold_standard`
 
 **▸ What this method does (whole function):** loads the human-annotated
-`(noisy, clean)` pairs from CSV/JSON, tolerating different column names.
+`(noisy, clean)` pairs from a CSV/JSON file, tolerating different column names, and
+returns them as two parallel lists.
 
 ```python
-        noisy = row.get("noisy", row.get("input", "")).strip()
-        clean = row.get("clean", row.get("target", row.get("normalized", ""))).strip()
-        if noisy and clean:
-            noisy_texts.append(noisy)
-            clean_texts.append(clean)
+    def load_gold_standard(self, filepath: str) -> Tuple[List[str], List[str]]:
+        path = Path(filepath)
+        noisy_texts = []
+        clean_texts = []
 ```
-**▸ line notes:**
-- Chained `.get(...)` calls try several possible column names (`noisy`/`input`,
-  `clean`/`target`/`normalized`) so different file headers still work.
-- `if noisy and clean:` — only keep the pair if **both** are non-empty (a
-  non-empty string is "truthy").
+**▸ What this block does:** wrap the path and start two empty result lists (kept in
+lockstep — index `i` in each is the same pair).
+
+```python
+        if path.suffix == ".csv":
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+```
+**▸ What this block does:** open a CSV and read it row by row as dicts (same
+`DictReader` pattern as `load_clean_corpus`).
+
+```python
+                    noisy = row.get("noisy", row.get("input", "")).strip()
+                    clean = row.get("clean", row.get("target", row.get("normalized", ""))).strip()
+```
+**▸ What this block does:** pull the noisy and clean text, tolerating several
+possible column names.
+- `row.get("noisy", row.get("input", ""))` — try `"noisy"`, then `"input"`, then
+  `""`. So a file with a `noisy` column *or* an `input` column both work.
+- `row.get("clean", row.get("target", row.get("normalized", "")))` — try `"clean"`,
+  then `"target"`, then `"normalized"`, then `""`.
+- `.strip()` — trim whitespace on each.
+
+```python
+                    if noisy and clean:
+                        noisy_texts.append(noisy)
+                        clean_texts.append(clean)
+```
+**▸ What this block does:** keep the pair only if **both** halves are non-empty (an
+empty string is "falsy", so `if noisy and clean` skips half-blank rows), appending
+each to its list.
+
+```python
+        elif path.suffix == ".json":
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for item in data:
+                noisy = item.get("noisy", item.get("input", "")).strip()
+                clean = item.get("clean", item.get("target", item.get("normalized", ""))).strip()
+                if noisy and clean:
+                    noisy_texts.append(noisy)
+                    clean_texts.append(clean)
+```
+**▸ What this block does:** the JSON branch does the same thing, reading each
+object's fields with the same fallback column names.
+
+```python
+        logger.info(f"Loaded {len(noisy_texts)} gold standard pairs from {filepath}")
+        return noisy_texts, clean_texts
+```
+**▸ What this block does:** log the count, then return the two parallel lists.
+- `logger.info(f"Loaded {len(noisy_texts)} gold standard pairs from {filepath}")` —
+  progress log (e.g. `Loaded 15000 gold standard pairs from data/gold.csv`).
+- `return noisy_texts, clean_texts` — hand back both lists as a tuple
+  `(noisy, clean)`, index-aligned.
+
+### Method `clean_text`
+
+**▸ What this method does (whole function):** light text cleaning for privacy and
+tidiness — anonymize @-mentions, replace URLs, and collapse repeated spaces.
+
+```python
+    def clean_text(self, text: str) -> str:
+        text = _replace_mentions(text)
+        text = _replace_urls(text)
+        text = " ".join(text.split())
+        return text.strip()
+```
+**▸ line by line:**
+- `_replace_mentions(text)` — turn `@username` into `@ANON` (see the helper at the
+  bottom of the file).
+- `_replace_urls(text)` — turn links into `<URL>`.
+- `" ".join(text.split())` — `text.split()` breaks on **any** run of whitespace and
+  drops the gaps; joining with single spaces collapses multiple spaces/tabs/newlines
+  into one.
+- `.strip()` — trim the ends. Returns the cleaned string.
+
+**Worked example**
+```
+clean_text("@juan   check    https://x.co/ab   grabe")
+  → "@ANON check <URL> grabe"
+```
 
 ### Method `generate_synthetic_pairs`
 
@@ -746,16 +1255,33 @@ size, computing n\* for each.
 
 ```python
     def generate_synthetic_pairs(self, clean_sentences, target_size=1_000_000):
-        noisy_texts = []; clean_texts = []; noise_levels = []
+        noisy_texts = []
+        clean_texts = []
+        noise_levels = []
         passes = max(1, target_size // len(clean_sentences))
         remainder = target_size % len(clean_sentences)
 ```
-**▸ What this block does:** figure out how many full passes over the corpus are
-needed, plus the leftover.
+**▸ What this block does:** start three empty parallel lists, then figure out how
+many full passes over the corpus are needed plus the leftover.
+- `noisy_texts = []` / `clean_texts = []` / `noise_levels = []` — the three output
+  lists, kept in lockstep (same index = same example).
 - `1_000_000` — Python lets you put `_` in numbers for readability (= 1,000,000).
 - `target_size // len(clean_sentences)` — `//` is **integer division**; how many
   whole passes reach the target. `max(1, ...)` ensures at least one pass.
 - `target_size % len(clean_sentences)` — `%` is **modulo**, the leftover count.
+
+```python
+        logger.info(
+            f"Generating ~{target_size} synthetic pairs "
+            f"({passes} passes + {remainder} extra)"
+        )
+```
+**▸ What this block does:** print a progress message (via the shared logger from
+`logging_utils.py`) announcing how much data is about to be generated — e.g.
+`Generating ~1000000 synthetic pairs (25 passes + 12345 extra)`. Purely
+observability; it doesn't change the data.
+- `logger.info(...)` — emit an INFO-level log line.
+- `f"...{passes}...{remainder}..."` — an f-string filling in the computed numbers.
 
 ```python
         for pass_num in range(passes):
@@ -776,12 +1302,46 @@ files come together.
 ```python
         extra = self.rng.sample(clean_sentences, min(remainder, len(clean_sentences)))
         for clean in extra:
-            ... (same three appends) ...
+            noisy = self.noise_gen.apply_noise(clean)
+            n_star = compute_noise_level(noisy, clean)
+            noisy_texts.append(noisy)
+            clean_texts.append(clean)
+            noise_levels.append(n_star)
+
+        logger.info(f"Generated {len(noisy_texts)} synthetic pairs")
         return noisy_texts, clean_texts, noise_levels
 ```
-**▸ What this block does:** top up with `remainder` more randomly-chosen sentences
-to hit the exact target, then return the three parallel lists.
-- `self.rng.sample(list, k)` — pick `k` **distinct** random items.
+**▸ What this block does:** the whole-passes loop above lands *just under* the target
+(because it only does complete passes); this tops up with `remainder` more
+randomly-chosen sentences to hit the exact target, corrupting and scoring each the
+same way, then returns the three parallel lists.
+- `self.rng.sample(list, k)` — pick `k` **distinct** random items from the corpus.
+- `min(remainder, len(clean_sentences))` — never ask for more than exist.
+- The loop body is identical to the main loop (make noisy → compute n\* → append to
+  all three lists).
+- `logger.info(f"Generated {len(noisy_texts)} synthetic pairs")` — a progress log
+  reporting the final count (e.g. `Generated 1000000 synthetic pairs`).
+  `len(noisy_texts)` is how many pairs ended up in the list. Observability only.
+- `return noisy_texts, clean_texts, noise_levels` — hand back the three parallel
+  lists as a tuple (the caller, usually `preprocessing`/a script, then splits them).
+
+**Worked walkthrough** (tiny numbers)
+```
+generate_synthetic_pairs(clean_sentences=[A, B, C], target_size=7)
+
+passes    = max(1, 7 // 3) = 2      # two full passes over [A, B, C] = 6 pairs
+remainder = 7 % 3           = 1      # 1 more needed
+
+pass 0: corrupt A, B, C  → 3 pairs
+pass 1: corrupt A, B, C  → 3 pairs   (different noise; RNG has advanced)
+                                     → 6 pairs so far
+extra: rng.sample([A,B,C], 1) = [B]  → corrupt B → 1 pair
+                                     → 7 pairs total
+
+returns (noisy_texts[7], clean_texts[7], noise_levels[7])
+```
+(At the real scale the corpus is tens of thousands of sentences and `target_size`
+is 1,000,000, so `passes` is a few dozen.)
 
 ### Method `split_data`
 
@@ -814,22 +1374,90 @@ the split is random but repeatable.
         splits = {}
         train_idx = indices[:train_end]
         val_idx = indices[train_end:val_end]
-        splits["train"] = ([noisy_texts[i] for i in train_idx],
-                           [clean_texts[i] for i in train_idx],
-                           [noise_levels[i] for i in train_idx])
-        splits["val"] = (... val_idx ...)
+```
+**▸ What this block does:** carve the shuffled position list into the train slice and
+the val slice.
+- `indices[:train_end]` — the first `train_end` shuffled positions → the training
+  set's positions.
+- `indices[train_end:val_end]` — the next chunk → the validation set's positions.
+
+```python
+        splits["train"] = (
+            [noisy_texts[i] for i in train_idx],
+            [clean_texts[i] for i in train_idx],
+            [noise_levels[i] for i in train_idx],
+        )
+```
+**▸ What this block does:** gather the actual data for the training split into a
+tuple of three parallel lists.
+- `[noisy_texts[i] for i in train_idx]` — pick the noisy texts at those shuffled
+  positions. The same `train_idx` is reused for all three lists, so index alignment
+  is preserved (position `i` is the *same pair* across noisy/clean/n\*).
+
+```python
+        splits["val"] = (
+            [noisy_texts[i] for i in val_idx],
+            [clean_texts[i] for i in val_idx],
+            [noise_levels[i] for i in val_idx],
+        )
+```
+**▸ What this block does:** the identical gather for the validation split, using
+`val_idx`.
+
+```python
         if test_ratio > 0:
             test_idx = indices[val_end:]
-            splits["test"] = (... test_idx ...)
+            splits["test"] = (
+                [noisy_texts[i] for i in test_idx],
+                [clean_texts[i] for i in test_idx],
+                [noise_levels[i] for i in test_idx],
+            )
+```
+**▸ What this block does:** if a test split was requested, everything after `val_end`
+becomes the test set (the held-out data used only for final scoring), gathered the
+same way.
+- `if test_ratio > 0:` — synthetic data uses no test split (it passes `0.0`), so
+  this is skipped for Stage-1 data; gold data passes `0.1`, so it runs.
+- `indices[val_end:]` — all remaining positions.
+
+```python
+        for split_name, (noisy, clean, nl) in splits.items():
+            logger.info(f"  {split_name}: {len(noisy)} pairs")
+
         return splits
 ```
-**▸ What this block does:** slice the shuffled positions into three groups and
-gather the matching items from all three parallel lists into `(noisy, clean,
-noise_levels)` tuples — exactly the shape `NormalizationDataset` expects.
-- `indices[:train_end]` / `[train_end:val_end]` / `[val_end:]` — slices of the
-  shuffled positions.
-- `[noisy_texts[i] for i in train_idx]` — gather the items at those positions.
-- `splits` — a dict keyed `"train"`, `"val"`, optionally `"test"`.
+**▸ What this block does:** log the size of each split, then return the dict.
+- `splits.items()` — iterate the dict as `(key, value)` pairs; here the value is
+  itself a tuple `(noisy, clean, nl)`, which is **unpacked** inline into three
+  variables in the loop header.
+- `logger.info(f"  {split_name}: {len(noisy)} pairs")` — one line per split, e.g.
+  `train: 12000 pairs`, `val: 1500 pairs`, `test: 1500 pairs`.
+- `return splits` — hand back the dict keyed `"train"`, `"val"`, and optionally
+  `"test"`, each holding a `(noisy, clean, noise_levels)` tuple — exactly the shape
+  `NormalizationDataset` expects.
+
+**Worked walkthrough** (10 examples, 80/10/10)
+```
+split_data(noisy, clean, n_stars, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1)
+# with 10 examples:
+
+n = 10
+indices = [0,1,2,3,4,5,6,7,8,9]
+rng.shuffle(indices)  → e.g. [3, 7, 0, 9, 2, 5, 1, 8, 4, 6]   (seeded → same every run)
+
+train_end = int(10 * 0.8) = 8
+val_end   = 8 + int(10 * 0.1) = 9
+
+train_idx = indices[:8]   = [3, 7, 0, 9, 2, 5, 1, 8]   → 8 examples
+val_idx   = indices[8:9]  = [4]                         → 1 example
+test_idx  = indices[9:]   = [6]                         → 1 example
+
+splits["train"] = (noisy at [3,7,0,9,2,5,1,8], clean at same, n* at same)
+splits["val"]   = (noisy at [4], ...)
+splits["test"]  = (noisy at [6], ...)
+```
+Because the shuffle is seeded (seed 42), the exact same sentences land in the same
+split every run — which is what makes results reproducible.
 
 ### Module-level helper functions
 
