@@ -93,6 +93,18 @@ inline explanation of why the intuitive alternative silently breaks training.
 - [ ] T019 **HIGH** Add a paragraph to the manuscript stating that an official MrT5 release exists ([`stanfordnlp/mrt5-small`](https://huggingface.co/stanfordnlp/mrt5-small)) and why this study reimplements rather than uses it — the control-variable argument in `research.md`. Currently the manuscript is silent, which reads as not having known (missing)
 - [ ] T020 Validate the reimplementation against the reference: run `stanfordnlp/mrt5-small` and this repo's gate on identical input and compare deletion behaviour at δ=0.5, layer 3. This is the strongest available answer to "how do you know your MrT5 is faithful?", which currently has no evidence behind it beyond following the paper (missing)
 
+### Migration to Stanford's implementation (AD-001)
+
+Decided in [`../DECISIONS.md`](../DECISIONS.md). **Not to be started before the
+presentation** — it replaces working, tested code.
+
+- [ ] T021 **HIGH** Add a top-level `LICENSE`/`NOTICE` and `ATTRIBUTIONS.md` crediting jkallini/mrt5 under Apache 2.0. Required *before* any of their code is vendored, not after (missing)
+- [ ] T022 Vendor `models/modeling_mrt5.py` from jkallini/mrt5 into `src/models/`, preserving its licence header. Prefer vendoring the single file over depending on the repo, which is a clone-not-pip research release whose `utils.py` expects a `BASE_PATH` macro to be edited (missing)
+- [ ] T023 Replace `src/models/delete_gate.py`'s gate with Stanford's, keeping `fixed_deletion_target = 0.5` and `delete_gate_layer = 3` — both already match the released configuration (missing)
+- [ ] T024 Revise `tests/test_delete_gate.py` and `tests/test_model_forward.py`, which assume the current gate's 4-tuple return signature (missing)
+- [ ] T025 Confirm whether adopting Stanford's loss alongside their gate resolves finding 8 (the `L_attn_reg` deviation). **Confirm, do not assume** (partial)
+- [ ] T026 Train from `google/byt5-small`, **never** from `stanfordnlp/mrt5-small`. The checkpoint carries multilingual pretraining the other two variants lack and would confound the comparison — see AD-001 (missing)
+
 **Checkpoint**: After T015–T018, run `/speckit-analyze`.
 
 ---

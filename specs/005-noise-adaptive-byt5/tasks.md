@@ -107,6 +107,19 @@ claimed in a comment.
 - [ ] T020 [P] Wrap the `navg` EMA update at `src/models/delete_gate.py:136` in `torch.no_grad()`. Currently safe only because `n_detached` is used — making it structural rather than incidental (partial)
 - [ ] T021 [P] The `L_attn_reg` deviation inherited from `004` affects TAHIMIK's loss identically. Tracked there as T015; do not fix twice (contradicts)
 
+### Migration to Stanford's implementation (AD-001)
+
+TAHIMIK must extend **the same** gate MrT5 uses. If MrT5 ran Stanford's
+implementation while TAHIMIK ran a hand-written one, the two would differ in
+more than the noise conditioning and the contribution would be unmeasurable.
+
+Depends on 004's T022–T023 landing first. **Not before the presentation.**
+
+- [ ] T022 Re-apply the noise-adaptive shift `cn · (n − navg)` as an extension of Stanford's gate rather than of the hand-written one, preserving both detach points (missing)
+- [ ] T023 Re-apply the per-sentence deletion target `d_max · (1 − n)`, which is TAHIMIK's own and has no MrT5 equivalent (missing)
+- [ ] T024 Re-verify gradient isolation after migration. `tests/test_model_forward.py::test_noise_estimator_is_trained_only_by_l_ne` is the guard; it must still pass, and if it cannot be made to pass against Stanford's gate, **stop and reassess** — that guarantee is what makes the comparison fair (missing)
+- [ ] T025 Confirm findings 7 and 9 (`cn` sign, `navg` init, clamp saturation) survive the migration. All three are TAHIMIK's own additions and appear in no MrT5 implementation, so none are resolved by it (partial)
+
 **Checkpoint**: After T016, T019, T020, run `/speckit-analyze`. T017 and T018
 stay open until you decide.
 

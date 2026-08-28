@@ -121,6 +121,32 @@ Everything else either already works or is visibly incomplete.
 
 ---
 
+## Decided, pending implementation
+
+**[AD-001](DECISIONS.md)** — the delete gate will be replaced with Stanford's
+official MrT5 implementation, trained from `byt5-small` on this study's data.
+Their released checkpoint will **not** be used, because its extra multilingual
+pretraining would be exclusive to one variant and would confound the
+comparison.
+
+Comparing the two implementations surfaced two differences worth knowing before
+that lands:
+
+- **Stanford adds Gumbel noise to the gate logits during training; this repo
+  does not.** That is a standard technique for making discrete keep/delete
+  decisions trainable, so training dynamics may differ materially.
+- **Hard deletion here is a Python loop over the batch**
+  (`delete_gate.py:226`); Stanford's is vectorised with `cumsum`/`gather`.
+  Hard deletion runs at *inference*, which is exactly what RQ2 measures, and
+  the overhead falls on the two compressed variants — the ones whose claim is
+  that they are faster. The magnitude is unmeasured, but the direction works
+  against the hypothesis.
+
+Nothing has been changed. See [`DECISIONS.md`](DECISIONS.md) for the full
+rationale and what it costs.
+
+---
+
 ## Needs your decision, not a code change
 
 ### 8. `L_attn_reg` deviates from MrT5 Appendix D
