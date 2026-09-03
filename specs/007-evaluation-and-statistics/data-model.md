@@ -23,7 +23,7 @@ Produced by `NormalizationMetrics.compute_all()`.
 | Key | Range | Source | Notes |
 |-----|-------|--------|-------|
 | `gleu_plus` | `[0, 1]` | `nltk` | RQ1.1 |
-| `chrf` | `[0, 100]` | `sacrebleu`, `char_order=6, word_order=2` | RQ1.2. Note the different scale from the others |
+| `chrf` | `[0, 100]` | `sacrebleu`, `char_order=6, word_order=0` | RQ1.2. Note the different scale from the others |
 | `err` | `(−∞, 1]` | `editdistance` | RQ1.3. **The only metric that can be negative**, when the model makes text worse. Degenerate case (`errors_before = 0`) resolves to `1.0` if perfect, `0.0` otherwise |
 | `alpha_word_accuracy` | `[0, 1]` | in-repo | RQ1.4 |
 
