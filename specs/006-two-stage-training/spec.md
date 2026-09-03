@@ -162,3 +162,5 @@ one. Recorded as a task rather than claimed.
 - [ ] T004 [P] Replace the hardcoded tokenizer at `scripts/run_experiment.py:87` with `config.model_name` (partial)
 - [ ] T005 Audit `src/data/noise_generator.py` against the manuscript's nine noise categories and record which are implemented (partial)
 - [ ] T006 [P] Write `tests/test_trainer.py` covering SC-001 through SC-005 (missing)
+
+Synthetic noise probabilities are configuration-driven; slang, emoji, code-switching, and Taglish morphology are preserved in synthetic pretraining data.

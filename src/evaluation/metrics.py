@@ -1,179 +1,69 @@
-# =============================================================================
-# Normalization Quality Metrics for TAHIMIK Evaluation
-#
-# Four metrics from the manuscript (Evaluation Criteria for Normalization
-# Accuracy section):
-#
-#   GLEU+ — Sentence-level variant of BLEU using 1-4 n-grams with
-#           add-one smoothing. Averaged across all test sentences.
-#           Captures n-gram precision and recall at the byte/word level.
-#
-#   chrF  — Character-level F-score using character n-grams (1-6) and
-#           word n-grams (0-2). Computed by SacreBLEU. Particularly
-#           suitable for byte-level models since it evaluates at the
-#           character grain, aligning with ByT5's input representation.
-#
-#   ERR   — Error Reduction Rate. Measures what fraction of the errors
-#           present in the noisy input were corrected by the model:
-#           ERR = (errors_before - errors_after) / errors_before
-#           Uses edit distance. ERR > 0 means improvement over the input.
-#
-#   Alpha-word Accuracy — Fraction of alpha-only words in the predicted
-#           output that exactly match the reference. Focuses on real word
-#           accuracy, ignoring punctuation and special tokens.
-# =============================================================================
-
-import re
+﻿import re
+from collections import Counter
+from typing import Dict, List, Optional
 import editdistance
-from typing import List, Dict
-from sacrebleu.metrics import BLEU, CHRF
-
+from sacrebleu.metrics import CHRF
 
 class NormalizationMetrics:
-    """
-    Computes all four normalization accuracy metrics.
-
-    Usage:
-        metrics = NormalizationMetrics()
-        results = metrics.compute_all(predictions, references, noisy_inputs)
-    """
-
     def __init__(self):
-        # SacreBLEU BLEU scorer with sentence-level smoothing
-        self.bleu_scorer = BLEU(smooth_method="add-k", smooth_value=1)
-        # chrF scorer with character 6-grams and word 2-grams
         self.chrf_scorer = CHRF(char_order=6, word_order=2)
 
-    def compute_gleu_plus(
-        self,
-        predictions: List[str],
-        references: List[str],
-    ) -> float:
-        """
-        Compute GLEU+ (sentence-level BLEU with add-one smoothing).
+    @staticmethod
+    def _ngrams(tokens: List[str], order: int) -> Counter:
+        return Counter(tuple(tokens[i:i + order]) for i in range(len(tokens) - order + 1))
 
-        Scores each prediction against its reference individually,
-        then averages across all sentences.
-
-        Returns:
-            Average GLEU+ score in [0, 100].
-        """
+    def _sentence_gleu_plus(self, prediction: str, reference: str, noisy: str = "") -> float:
+        pred, ref, source = prediction.split(), reference.split(), noisy.split()
+        if not pred or not ref:
+            return 100.0 if pred == ref else 0.0
         scores = []
-        for pred, ref in zip(predictions, references):
-            score = self.bleu_scorer.sentence_score(pred, [ref])
-            scores.append(score.score)
+        for order in range(1, 5):
+            pc, rc = self._ngrams(pred, order), self._ngrams(ref, order)
+            if not pc:
+                continue
+            overlap = sum((pc & rc).values())
+            precision = overlap / max(sum(pc.values()), 1)
+            recall = overlap / max(sum(rc.values()), 1)
+            source_overlap = sum((pc & self._ngrams(source, order)).values()) if source else 0
+            penalty = 1.0 - source_overlap / max(sum(pc.values()), 1) if source else 1.0
+            scores.append(min(precision, recall) * max(penalty, 0.0))
+        return 100.0 * sum(scores) / max(len(scores), 1)
 
-        return sum(scores) / max(len(scores), 1)
+    def compute_gleu_plus(self, predictions: List[str], references: List[str], noisy_inputs: Optional[List[str]] = None) -> List[float]:
+        noisy_inputs = noisy_inputs or [""] * len(predictions)
+        return [self._sentence_gleu_plus(p, r, n) for p, r, n in zip(predictions, references, noisy_inputs)]
 
-    def compute_chrf(
-        self,
-        predictions: List[str],
-        references: List[str],
-    ) -> float:
-        """
-        Compute corpus-level chrF score.
+    def compute_chrf(self, predictions: List[str], references: List[str]) -> float:
+        return self.chrf_scorer.corpus_score(predictions, [references]).score
 
-        Returns:
-            chrF score in [0, 100].
-        """
-        result = self.chrf_scorer.corpus_score(predictions, [references])
-        return result.score
+    @staticmethod
+    def _err(pred: str, ref: str, noisy: str) -> float:
+        before, after = editdistance.eval(noisy, ref), editdistance.eval(pred, ref)
+        return 1.0 if before == 0 and after == 0 else (0.0 if before == 0 else (before - after) / before)
 
-    def compute_err(
-        self,
-        predictions: List[str],
-        references: List[str],
-        noisy_inputs: List[str],
-    ) -> float:
-        """
-        Compute Error Reduction Rate (ERR).
+    def compute_err(self, predictions: List[str], references: List[str], noisy_inputs: List[str]) -> float:
+        values = [self._err(p, r, n) for p, r, n in zip(predictions, references, noisy_inputs)]
+        return sum(values) / max(len(values), 1)
 
-        ERR = (errors_before - errors_after) / errors_before
+    @staticmethod
+    def _alpha(pred: str, ref: str) -> float:
+        pattern = re.compile(r"^[^\W\d_]+$", re.UNICODE)
+        ref_words, pred_words = ref.split(), pred.split()
+        indices = [i for i, word in enumerate(ref_words) if pattern.match(word)]
+        return sum(i < len(pred_words) and pred_words[i].lower() == ref_words[i].lower() for i in indices) / max(len(indices), 1)
 
-        where errors_before = edit_distance(noisy, reference)
-              errors_after  = edit_distance(prediction, reference)
+    def compute_alpha_word_accuracy(self, predictions: List[str], references: List[str]) -> float:
+        values = [self._alpha(p, r) for p, r in zip(predictions, references)]
+        return sum(values) / max(len(values), 1)
 
-        An ERR of 1.0 means all errors were corrected.
-        An ERR of 0.0 means the model made no improvement.
-        A negative ERR means the model introduced more errors.
-
-        Returns:
-            Average ERR across all sentences.
-        """
-        err_scores = []
-
-        for pred, ref, noisy in zip(predictions, references, noisy_inputs):
-            errors_before = editdistance.eval(noisy, ref)
-            errors_after = editdistance.eval(pred, ref)
-
-            if errors_before == 0:
-                # Input was already clean — ERR is 1.0 if output is also
-                # clean, otherwise penalize
-                err = 1.0 if errors_after == 0 else 0.0
-            else:
-                err = (errors_before - errors_after) / errors_before
-
-            err_scores.append(err)
-
-        return sum(err_scores) / max(len(err_scores), 1)
-
-    def compute_alpha_word_accuracy(
-        self,
-        predictions: List[str],
-        references: List[str],
-    ) -> float:
-        """
-        Compute alpha-word accuracy.
-
-        For each sentence pair, extract alpha-only words (letters only,
-        no digits/punctuation/emoji), align by position, and compute
-        the fraction that match exactly (case-insensitive).
-
-        Returns:
-            Average alpha-word accuracy in [0, 1].
-        """
-        total_words = 0
-        correct_words = 0
-
-        alpha_pattern = re.compile(r"^[a-zA-Z]+$")
-
-        for pred, ref in zip(predictions, references):
-            ref_words = ref.split()
-            pred_words = pred.split()
-
-            for i, ref_word in enumerate(ref_words):
-                if not alpha_pattern.match(ref_word):
-                    continue
-
-                total_words += 1
-                if i < len(pred_words):
-                    if pred_words[i].lower() == ref_word.lower():
-                        correct_words += 1
-
-        return correct_words / max(total_words, 1)
-
-    def compute_all(
-        self,
-        predictions: List[str],
-        references: List[str],
-        noisy_inputs: List[str],
-    ) -> Dict[str, float]:
-        """
-        Compute all four normalization metrics.
-
-        Args:
-            predictions: Model-generated normalized sentences.
-            references: Gold-standard reference sentences.
-            noisy_inputs: Original noisy input sentences.
-
-        Returns:
-            Dict with keys: 'gleu_plus', 'chrf', 'err', 'alpha_word_accuracy'.
-        """
+    def compute_per_sentence(self, predictions: List[str], references: List[str], noisy_inputs: List[str]) -> Dict[str, List[float]]:
         return {
-            "gleu_plus": self.compute_gleu_plus(predictions, references),
-            "chrf": self.compute_chrf(predictions, references),
-            "err": self.compute_err(predictions, references, noisy_inputs),
-            "alpha_word_accuracy": self.compute_alpha_word_accuracy(
-                predictions, references
-            ),
+            "gleu_plus": self.compute_gleu_plus(predictions, references, noisy_inputs),
+            "chrf": [self.chrf_scorer.sentence_score(p, [r]).score for p, r in zip(predictions, references)],
+            "err": [self._err(p, r, n) for p, r, n in zip(predictions, references, noisy_inputs)],
+            "alpha_word_accuracy": [self._alpha(p, r) for p, r in zip(predictions, references)],
         }
+
+    def compute_all(self, predictions: List[str], references: List[str], noisy_inputs: List[str]) -> Dict[str, float]:
+        per_sentence = self.compute_per_sentence(predictions, references, noisy_inputs)
+        return {key: float(sum(values) / max(len(values), 1)) for key, values in per_sentence.items()}
