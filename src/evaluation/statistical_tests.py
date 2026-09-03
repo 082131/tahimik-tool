@@ -1,56 +1,294 @@
-﻿import numpy as np
+"""Statistical hypothesis testing suite for text normalization and efficiency.
+
+Implements the exact Chapter 3 statistical methodology:
+  1. Paired bootstrap resampling (1,000 iterations) with add-one smoothing,
+     two-tailed empirical p-values, 95% percentile confidence intervals,
+     and CI-aware significance gating.
+  2. Wilcoxon signed-rank test for paired GPU memory observations with median,
+     interquartile range (IQR), and rank-biserial correlation effect size.
+  3. Holm-Bonferroni step-down family-wise error rate (FWER) correction,
+     reporting both raw and monotonic adjusted p-values across declared
+     accuracy and efficiency comparison families.
+"""
+
+from typing import Any, Dict, List, Tuple
+
+import numpy as np
 from scipy import stats
-from typing import Dict, List, Tuple
+
 
 class StatisticalAnalysis:
-    def __init__(self, alpha: float = 0.05, n_bootstrap: int = 1000, seed: int = 42):
-        self.alpha, self.n_bootstrap = alpha, n_bootstrap
+    """Statistical testing suite for comparing model variants."""
+
+    def __init__(
+        self,
+        alpha: float = 0.05,
+        n_bootstrap: int = 1000,
+        seed: int = 42,
+    ):
+        self.alpha = alpha
+        self.n_bootstrap = n_bootstrap
         self.rng = np.random.RandomState(seed)
 
-    def paired_bootstrap(self, scores_a, scores_b, metric_name="metric", higher_is_better=True):
-        a, b = np.asarray(scores_a, dtype=float), np.asarray(scores_b, dtype=float)
-        if len(a) != len(b) or not len(a): raise ValueError("paired scores must be non-empty and equal length")
-        observed = (b.mean() - a.mean()) if higher_is_better else (a.mean() - b.mean())
-        deltas = []
-        for _ in range(self.n_bootstrap):
-            idx = self.rng.randint(0, len(a), len(a))
-            deltas.append((b[idx].mean() - a[idx].mean()) if higher_is_better else (a[idx].mean() - b[idx].mean()))
-        deltas = np.asarray(deltas)
-        lower_tail = (1 + np.sum(deltas <= 0)) / (self.n_bootstrap + 1)
-        upper_tail = (1 + np.sum(deltas >= 0)) / (self.n_bootstrap + 1)
-        p = min(1.0, 2 * min(lower_tail, upper_tail))
-        lo, hi = np.percentile(deltas, [2.5, 97.5])
-        return {"metric": metric_name, "p_value": float(p), "mean_a": float(a.mean()), "mean_b": float(b.mean()), "delta": float(observed), "ci_lower": float(lo), "ci_upper": float(hi), "significant": bool(p < self.alpha and (lo > 0 or hi < 0)), "higher_is_better": higher_is_better}
+    def paired_bootstrap(
+        self,
+        scores_a: List[float],
+        scores_b: List[float],
+        metric_name: str = "metric",
+        higher_is_better: bool = True,
+    ) -> Dict[str, Any]:
+        """Paired bootstrap test comparing model A (baseline) and model B (TAHIMIK).
 
-    def wilcoxon_test(self, measurements_a, measurements_b, metric_name="gpu_memory"):
-        a, b = np.asarray(measurements_a, dtype=float), np.asarray(measurements_b, dtype=float)
-        if len(a) != len(b) or not len(a): raise ValueError("paired measurements must be non-empty and equal length")
-        d = b - a
-        stat, p = (0.0, 1.0) if np.all(d == 0) else stats.wilcoxon(a, b, alternative="two-sided")
-        nonzero = d[d != 0]
-        rank_biserial = float((np.sum(nonzero > 0) - np.sum(nonzero < 0)) / len(nonzero)) if len(nonzero) else 0.0
-        qa = np.percentile(a, [25, 75]); qb = np.percentile(b, [25, 75])
-        return {"metric": metric_name, "statistic": float(stat), "p_value": float(p), "significant": bool(p < self.alpha), "mean_a": float(a.mean()), "mean_b": float(b.mean()), "median_a": float(np.median(a)), "median_b": float(np.median(b)), "iqr_a": float(qa[1]-qa[0]), "iqr_b": float(qb[1]-qb[0]), "rank_biserial": rank_biserial}
+        Resamples paired sentence observations with replacement to determine if
+        the performance delta between model B and model A is statistically
+        distinguishable from zero.
+
+        Sign convention:
+          - For higher-is-better metrics (accuracy, GLEU+, chrF, ERR):
+              delta = B - A  (positive means B/TAHIMIK is better)
+          - For lower-is-better metrics (inference latency):
+              delta = A - B  (positive means B/TAHIMIK is faster)
+        """
+        a = np.asarray(scores_a, dtype=float)
+        b = np.asarray(scores_b, dtype=float)
+
+        if len(a) != len(b) or len(a) == 0:
+            raise ValueError("Paired scores must be non-empty and of equal length.")
+
+        # Observed difference on the actual sample
+        if higher_is_better:
+            observed_delta = b.mean() - a.mean()
+        else:
+            observed_delta = a.mean() - b.mean()
+
+        # Resample sentence indices with replacement 1,000 times
+        deltas = []
+        n = len(a)
+
+        for _ in range(self.n_bootstrap):
+            # Sample paired indices together so the sentence alignment is preserved
+            idx = self.rng.randint(0, n, size=n)
+            resampled_a = a[idx]
+            resampled_b = b[idx]
+
+            if higher_is_better:
+                boot_delta = resampled_b.mean() - resampled_a.mean()
+            else:
+                boot_delta = resampled_a.mean() - resampled_b.mean()
+
+            deltas.append(boot_delta)
+
+        deltas = np.asarray(deltas)
+
+        # Two-tailed empirical p-value with add-one smoothing (Davison & Hinkley, 1997).
+        # Add-one smoothing ensures p-value is never exactly 0.0 under finite resampling.
+        lower_tail = (1.0 + np.sum(deltas <= 0)) / (self.n_bootstrap + 1.0)
+        upper_tail = (1.0 + np.sum(deltas >= 0)) / (self.n_bootstrap + 1.0)
+        p_value = min(1.0, 2.0 * min(lower_tail, upper_tail))
+
+        # 95% Percentile Confidence Interval (2.5th and 97.5th percentiles)
+        ci_lower, ci_upper = np.percentile(deltas, [2.5, 97.5])
+
+        # Dual significance rule: must have p < alpha AND the 95% CI must exclude zero
+        is_significant = bool(p_value < self.alpha and (ci_lower > 0 or ci_upper < 0))
+
+        return {
+            "metric": metric_name,
+            "p_value": float(p_value),
+            "mean_a": float(a.mean()),
+            "mean_b": float(b.mean()),
+            "delta": float(observed_delta),
+            "ci_lower": float(ci_lower),
+            "ci_upper": float(ci_upper),
+            "significant": is_significant,
+            "higher_is_better": higher_is_better,
+        }
+
+    def wilcoxon_test(
+        self,
+        measurements_a: List[float],
+        measurements_b: List[float],
+        metric_name: str = "gpu_memory",
+    ) -> Dict[str, Any]:
+        """Paired two-sided Wilcoxon signed-rank test for independent GPU memory runs.
+
+        Reports test statistic, p-value, median, IQR for both variants, and the
+        matched-pairs rank-biserial correlation effect size.
+        """
+        a = np.asarray(measurements_a, dtype=float)
+        b = np.asarray(measurements_b, dtype=float)
+
+        if len(a) != len(b) or len(a) == 0:
+            raise ValueError("Paired measurements must be non-empty and of equal length.")
+
+        differences = b - a
+
+        if np.all(differences == 0):
+            statistic = 0.0
+            p_value = 1.0
+        else:
+            stat_res = stats.wilcoxon(a, b, alternative="two-sided")
+            statistic = float(stat_res.statistic)
+            p_value = float(stat_res.pvalue)
+
+        # Rank-biserial correlation effect size: (positive differences - negative differences) / total
+        nonzero_diffs = differences[differences != 0]
+        if len(nonzero_diffs) > 0:
+            pos_count = np.sum(nonzero_diffs > 0)
+            neg_count = np.sum(nonzero_diffs < 0)
+            rank_biserial = float((pos_count - neg_count) / len(nonzero_diffs))
+        else:
+            rank_biserial = 0.0
+
+        # Interquartile Range (IQR = Q3 - Q1)
+        q25_a, q75_a = np.percentile(a, [25, 75])
+        q25_b, q75_b = np.percentile(b, [25, 75])
+        iqr_a = float(q75_a - q25_a)
+        iqr_b = float(q75_b - q25_b)
+
+        return {
+            "metric": metric_name,
+            "statistic": float(statistic),
+            "p_value": float(p_value),
+            "significant": bool(p_value < self.alpha),
+            "mean_a": float(a.mean()),
+            "mean_b": float(b.mean()),
+            "median_a": float(np.median(a)),
+            "median_b": float(np.median(b)),
+            "iqr_a": iqr_a,
+            "iqr_b": iqr_b,
+            "rank_biserial": rank_biserial,
+        }
 
     @staticmethod
-    def holm_bonferroni(p_values: List[Tuple[str, float]], alpha=0.05):
-        m = len(p_values); ordered = sorted(p_values, key=lambda x: x[1]); results=[]; keep=True; previous=0.0
-        for rank, (name, raw) in enumerate(ordered, 1):
-            threshold = alpha / (m-rank+1); reject = keep and raw < threshold; keep = reject
-            adjusted = min(1.0, max(previous, raw * (m-rank+1))); previous = adjusted
-            results.append({"comparison": name, "raw_p": float(raw), "adjusted_p": float(adjusted), "rank": rank, "adjusted_alpha": threshold, "significant_corrected": bool(reject)})
+    def holm_bonferroni(
+        p_values: List[Tuple[str, float]],
+        alpha: float = 0.05,
+    ) -> List[Dict[str, Any]]:
+        """Applies step-down Holm-Bonferroni correction to control Family-Wise Error Rate (FWER).
+
+        Sorts p-values in ascending order, evaluates each against alpha / (m - rank + 1),
+        and enforces step-down early stopping (if test k fails to reject, all subsequent tests
+        fail as well). Adjusted p-values are cumulative maxima ensuring monotonicity.
+
+        Args:
+            p_values: List of (comparison_name, raw_p_value) tuples.
+            alpha: Overall family significance threshold (default 0.05).
+
+        Returns:
+            List of result dicts sorted by rank, containing raw and adjusted p-values.
+        """
+        m = len(p_values)
+        ordered_comparisons = sorted(p_values, key=lambda item: item[1])
+
+        results = []
+        still_rejecting = True
+        previous_adjusted = 0.0
+
+        for rank, (name, raw_p) in enumerate(ordered_comparisons, start=1):
+            # Step-down threshold for this rank
+            divisor = m - rank + 1
+            threshold = alpha / divisor
+
+            # Step-down rule: reject only if current test meets threshold AND all prior tests were rejected
+            reject = still_rejecting and (raw_p < threshold)
+            still_rejecting = reject
+
+            # Monotonic adjusted p-value: p_adj = min(1.0, max(prev_adj, raw_p * divisor))
+            adjusted_p = min(1.0, max(previous_adjusted, raw_p * divisor))
+            previous_adjusted = adjusted_p
+
+            results.append({
+                "comparison": name,
+                "raw_p": float(raw_p),
+                "adjusted_p": float(adjusted_p),
+                "rank": rank,
+                "adjusted_alpha": float(threshold),
+                "significant_corrected": bool(reject),
+            })
+
         return results
 
-    def run_full_comparison(self, per_sentence_scores: Dict[str, Dict[str, List[float]]], gpu_memory_runs: Dict[str, List[float]]):
-        pairs = [("byt5", "tahimik"), ("mrt5", "tahimik")]; metrics = ["gleu_plus", "chrf", "err", "alpha_word_accuracy"]
-        result = {"bootstrap": {}, "wilcoxon": {}, "holm_bonferroni": {"accuracy": [], "efficiency": []}}; accuracy_p=[]; efficiency_p=[]
-        for a,b in pairs:
-            key=f"{a}_vs_{b}"; result["bootstrap"][key]={}
-            for metric in metrics:
-                r=self.paired_bootstrap(per_sentence_scores[a][metric], per_sentence_scores[b][metric], metric); result["bootstrap"][key][metric]=r; accuracy_p.append((f"{key}:{metric}", r["p_value"]))
-            if "inference_time" in per_sentence_scores[a] and "inference_time" in per_sentence_scores[b]:
-                r=self.paired_bootstrap(per_sentence_scores[a]["inference_time"], per_sentence_scores[b]["inference_time"], "inference_time", higher_is_better=False); result["bootstrap"][key]["inference_time"]=r; efficiency_p.append((f"{key}:inference_time", r["p_value"]))
-            ma,mb=gpu_memory_runs.get(a,[]),gpu_memory_runs.get(b,[])
-            if ma and mb: result["wilcoxon"][key]=self.wilcoxon_test(ma,mb); efficiency_p.append((f"{key}:gpu_memory",result["wilcoxon"][key]["p_value"]))
-        result["holm_bonferroni"]["accuracy"]=self.holm_bonferroni(accuracy_p,self.alpha); result["holm_bonferroni"]["efficiency"]=self.holm_bonferroni(efficiency_p,self.alpha) if efficiency_p else []
+    def run_full_comparison(
+        self,
+        per_sentence_scores: Dict[str, Dict[str, List[float]]],
+        gpu_memory_runs: Dict[str, List[float]],
+    ) -> Dict[str, Any]:
+        """Runs the complete Chapter 3 statistical comparison between model variants.
+
+        Compares:
+          1. ByT5 vs. TAHIMIK
+          2. MrT5 vs. TAHIMIK
+
+        Across:
+          - Accuracy family: 4 metrics x 2 model pairs = 8 tests
+          - Efficiency family: Latency and GPU memory x 2 model pairs = up to 4 tests
+        """
+        pairs = [("byt5", "tahimik"), ("mrt5", "tahimik")]
+        accuracy_metrics = ["gleu_plus", "chrf", "err", "alpha_word_accuracy"]
+
+        result: Dict[str, Any] = {
+            "bootstrap": {},
+            "wilcoxon": {},
+            "holm_bonferroni": {
+                "accuracy": [],
+                "efficiency": [],
+            },
+        }
+
+        accuracy_p_values: List[Tuple[str, float]] = []
+        efficiency_p_values: List[Tuple[str, float]] = []
+
+        for model_a, model_b in pairs:
+            pair_key = f"{model_a}_vs_{model_b}"
+            result["bootstrap"][pair_key] = {}
+
+            # 1. Accuracy metrics via paired bootstrap
+            for metric in accuracy_metrics:
+                boot_res = self.paired_bootstrap(
+                    per_sentence_scores[model_a][metric],
+                    per_sentence_scores[model_b][metric],
+                    metric_name=metric,
+                    higher_is_better=True,
+                )
+                result["bootstrap"][pair_key][metric] = boot_res
+                accuracy_p_values.append((f"{pair_key}:{metric}", boot_res["p_value"]))
+
+            # 2. Inference latency via paired bootstrap (lower is better)
+            if (
+                "inference_time" in per_sentence_scores.get(model_a, {})
+                and "inference_time" in per_sentence_scores.get(model_b, {})
+            ):
+                boot_time = self.paired_bootstrap(
+                    per_sentence_scores[model_a]["inference_time"],
+                    per_sentence_scores[model_b]["inference_time"],
+                    metric_name="inference_time",
+                    higher_is_better=False,
+                )
+                result["bootstrap"][pair_key]["inference_time"] = boot_time
+                efficiency_p_values.append((f"{pair_key}:inference_time", boot_time["p_value"]))
+
+            # 3. Peak GPU memory via Wilcoxon signed-rank test
+            mem_a = gpu_memory_runs.get(model_a, [])
+            mem_b = gpu_memory_runs.get(model_b, [])
+
+            if mem_a and mem_b:
+                wilc_res = self.wilcoxon_test(mem_a, mem_b, metric_name="gpu_memory")
+                result["wilcoxon"][pair_key] = wilc_res
+                efficiency_p_values.append((f"{pair_key}:gpu_memory", wilc_res["p_value"]))
+
+        # 4. Apply Holm-Bonferroni correction within each declared family
+        result["holm_bonferroni"]["accuracy"] = self.holm_bonferroni(
+            accuracy_p_values,
+            alpha=self.alpha,
+        )
+
+        if efficiency_p_values:
+            result["holm_bonferroni"]["efficiency"] = self.holm_bonferroni(
+                efficiency_p_values,
+                alpha=self.alpha,
+            )
+        else:
+            result["holm_bonferroni"]["efficiency"] = []
+
         return result

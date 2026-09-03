@@ -22,7 +22,7 @@
 #
 #   L_NE       — Noise estimator loss. MSE between predicted noise score n
 #               and ground-truth n* (byte-level edit distance ratio).
-#               Only applies to TAHIMIK. This is the ONLY signal that trains
+#               This is the ONLY signal that trains
 #               the noise estimator — n is detached everywhere else.
 # =============================================================================
 

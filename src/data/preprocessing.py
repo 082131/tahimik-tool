@@ -1,4 +1,4 @@
-﻿# =============================================================================
+# =============================================================================
 # Data Preprocessing and Pipeline Management
 #
 # Handles loading, cleaning, splitting, and preparing data for the
@@ -47,7 +47,7 @@ class DataPipeline:
         self.rng = random.Random(seed)
         self.noise_gen = TagalogNoiseGenerator(seed=seed)
 
-    # â”€â”€ Data Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Data Loading --------------------------------------------------------
 
     def load_clean_corpus(self, filepath: str) -> List[str]:
         """
@@ -89,10 +89,10 @@ class DataPipeline:
                         if text:
                             sentences.append(text.strip())
 
-        # Filter by minimum word count (manuscript: â‰¥4 words)
+        # Filter by minimum word count (manuscript: >=4 words)
         sentences = [s for s in sentences if len(s.split()) >= 4]
 
-        # Filter by maximum byte length (manuscript: â‰¤1024 bytes)
+        # Filter by maximum byte length (manuscript: <=1024 bytes)
         sentences = [s for s in sentences if len(s.encode("utf-8")) <= 1024]
 
         logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")
@@ -147,7 +147,7 @@ class DataPipeline:
         logger.info(f"Loaded {len(noisy_texts)} gold standard pairs from {filepath}")
         return noisy_texts, clean_texts
 
-    # â”€â”€ Cleaning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Cleaning ------------------------------------------------------------
 
     def clean_text(self, text: str) -> str:
         """
@@ -164,7 +164,7 @@ class DataPipeline:
         text = " ".join(text.split())
         return text.strip()
 
-    # â”€â”€ Synthetic Data Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Synthetic Data Generation -------------------------------------------
 
     def generate_synthetic_pairs(
         self,
@@ -217,7 +217,7 @@ class DataPipeline:
         logger.info(f"Generated {len(noisy_texts)} synthetic pairs")
         return noisy_texts, clean_texts, noise_levels
 
-    # â”€â”€ Splitting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Splitting -----------------------------------------------------------
 
     def split_data(
         self,
@@ -276,7 +276,7 @@ class DataPipeline:
         return splits
 
 
-# â”€â”€ Helper functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Helper functions ----------------------------------------------------
 
 def _replace_mentions(text: str) -> str:
     """Replace @username patterns with @ANON."""
