@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TAHIMIK run provenance",
+  "type": "object",
+  "required": ["schema_version", "provenance_id", "code", "configuration", "operation", "randomness", "software", "hardware", "determinism", "data", "lineage", "eligibility"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "provenance_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "code": {"type": "object", "required": ["git_sha", "dirty"]},
+    "configuration": {"type": "object"},
+    "operation": {"type": "object"},
+    "randomness": {"type": "object", "required": ["seed"]},
+    "software": {"type": "object", "required": ["python", "platform", "pytorch", "packages"]},
+    "hardware": {"type": "object", "required": ["device_type", "cuda_build", "cuda_available", "cuda_runtime", "cudnn", "device_name", "device_capability", "precision"]},
+    "determinism": {"type": "object"},
+    "data": {"type": "object"},
+    "lineage": {"type": "object"},
+    "eligibility": {
+      "type": "object",
+      "required": ["eligible", "scope", "reason_codes"],
+      "properties": {
+        "eligible": {"type": "boolean"},
+        "scope": {"enum": ["chapter3_full", "accuracy_only", "development"]},
+        "reason_codes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    }
+  }
+}

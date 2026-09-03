@@ -8,4 +8,4 @@
 - [x] Data leakage is prohibited testably
 - [x] KWF scraping is explicitly out of scope
 - [ ] Category-specific bounds are supplied
-- [ ] Reviewed lexicon CSV contract is finalized
+- [x] Reviewed lexicon CSV contract is finalized
