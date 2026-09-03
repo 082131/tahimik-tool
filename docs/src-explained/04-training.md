@@ -22,6 +22,75 @@ dataset.py ─(batches)─► trainer.py ─(model outputs)─► losses.py ─(
 
 ---
 
+## Current methodology update (2026-09-03)
+
+### Reproducibility import
+
+```python
+from src.utils.reproducibility import collect_run_metadata
+```
+
+This `from ... import ...` statement makes the metadata collector available in
+`trainer.py`. In the current committed file, however, no trainer method calls it.
+That means the import expresses intended integration but does not put provenance
+inside checkpoints. Spec 013 correctly keeps checkpoint provenance as unfinished.
+
+### What `_save_checkpoint` really stores now
+
+```python
+if val_loss < self.best_val_loss:
+    self.best_val_loss = val_loss
+    path = os.path.join(checkpoint_dir, f"best_{stage}.pt")
+    torch.save({
+        "epoch": epoch,
+        "stage": stage,
+        "model_state_dict": self.model.state_dict(),
+        "val_loss": val_loss,
+    }, path)
+```
+
+**▸ Every relevant line:**
+
+- The `if` saves only when validation loss is lower than every earlier loss in the
+  currently tracked stage.
+- Updating `self.best_val_loss` makes later epochs compare against this new best.
+- The f-string creates `best_stage1.pt` or `best_stage2.pt`.
+- `torch.save` serializes a dictionary to that path.
+- `epoch` and `stage` identify when it was saved.
+- `model.state_dict()` is the learned parameter dictionary.
+- `val_loss` records why this epoch was selected.
+
+The checkpoint does **not yet** contain optimizer/scheduler state, resolved config,
+run provenance, checkpoint identity, or parentage. Those fields are required by
+specs 012 and 013, not present behavior.
+
+### Stage 1 → Stage 2 behavior
+
+```python
+if stage1_train is not None and stage1_val is not None:
+    self.best_val_loss = float("inf")
+    stage1_history = self.train_stage(...)
+
+if stage2_train is not None and stage2_val is not None:
+    self.best_val_loss = float("inf")
+    stage2_history = self.train_stage(...)
+```
+
+Resetting `best_val_loss` keeps Stage 1 and Stage 2 checkpoint *selection*
+independent. But after Stage 1, the model remains at the last epoch's in-memory
+weights. The code saves the best Stage 1 checkpoint but does not reload it before
+Stage 2 creates its optimizer. Therefore spec 012's handoff is still necessary.
+
+**Concrete example:** suppose Stage 1 validation losses are `0.8`, `0.5`, and
+`0.7`. The file `best_stage1.pt` contains epoch 2, but the in-memory model ends at
+epoch 3. Current Stage 2 starts from epoch 3. The required implementation must
+restore epoch 2 first.
+
+**Defense-ready summary:** “Each stage saves its own lowest-validation-loss file,
+but the present trainer does not yet restore Stage 1's best file for Stage 2 or
+embed complete provenance; those are explicit, unclaimed remediation tasks.”
+---
+
 ## Terms & abbreviations used across this folder
 | Term | Full form / plain meaning |
 |---|---|
