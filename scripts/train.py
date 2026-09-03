@@ -142,15 +142,20 @@ def main():
     )
 
     # Gold datasets
+    gold_train_noisy, gold_train_clean, gold_train_noise = gold_splits["train"]
+    gold_val_noisy, gold_val_clean, gold_val_noise = gold_splits["val"]
+
     stage2_train = NormalizationDataset(
-        *gold_splits["train"], tokenizer,
+        gold_train_noisy, gold_train_clean, tokenizer,
         max_input_length=config.max_input_length,
         max_target_length=config.max_target_length,
+        precomputed_noise_levels=gold_train_noise,
     )
     stage2_val = NormalizationDataset(
-        *gold_splits["val"], tokenizer,
+        gold_val_noisy, gold_val_clean, tokenizer,
         max_input_length=config.max_input_length,
         max_target_length=config.max_target_length,
+        precomputed_noise_levels=gold_val_noise,
     )
 
     # ── Stage 1: Synthetic data (optional) ──────────────────────────────
@@ -167,15 +172,20 @@ def main():
             train_ratio=config.synthetic_train_ratio,
             val_ratio=config.synthetic_val_ratio,
         )
+        syn_train_noisy, syn_train_clean, syn_train_noise = syn_splits["train"]
+        syn_val_noisy, syn_val_clean, syn_val_noise = syn_splits["val"]
+
         stage1_train = NormalizationDataset(
-            *syn_splits["train"], tokenizer,
+            syn_train_noisy, syn_train_clean, tokenizer,
             max_input_length=config.max_input_length,
             max_target_length=config.max_target_length,
+            precomputed_noise_levels=syn_train_noise,
         )
         stage1_val = NormalizationDataset(
-            *syn_splits["val"], tokenizer,
+            syn_val_noisy, syn_val_clean, tokenizer,
             max_input_length=config.max_input_length,
             max_target_length=config.max_target_length,
+            precomputed_noise_levels=syn_val_noise,
         )
 
     # ── Model ───────────────────────────────────────────────────────────

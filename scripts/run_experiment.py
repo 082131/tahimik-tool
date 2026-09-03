@@ -104,18 +104,23 @@ def main():
         test_ratio=base_config.gold_test_ratio,
     )
 
+    train_noisy, train_clean, train_noise = gold_splits["train"]
+    val_noisy, val_clean, val_noise = gold_splits["val"]
+    test_noisy, test_clean, test_noise = gold_splits["test"]
+
     stage2_train_ds = NormalizationDataset(
-        *gold_splits["train"], tokenizer,
+        train_noisy, train_clean, tokenizer,
         max_input_length=base_config.max_input_length,
         max_target_length=base_config.max_target_length,
+        precomputed_noise_levels=train_noise,
     )
     stage2_val_ds = NormalizationDataset(
-        *gold_splits["val"], tokenizer,
+        val_noisy, val_clean, tokenizer,
         max_input_length=base_config.max_input_length,
         max_target_length=base_config.max_target_length,
+        precomputed_noise_levels=val_noise,
     )
 
-    test_noisy, test_clean, test_noise = gold_splits["test"]
     test_dataset = NormalizationDataset(
         test_noisy, test_clean, tokenizer,
         max_input_length=base_config.max_input_length,
@@ -136,15 +141,20 @@ def main():
             train_ratio=base_config.synthetic_train_ratio,
             val_ratio=base_config.synthetic_val_ratio,
         )
+        syn_train_noisy, syn_train_clean, syn_train_noise = syn_splits["train"]
+        syn_val_noisy, syn_val_clean, syn_val_noise = syn_splits["val"]
+
         stage1_train_ds = NormalizationDataset(
-            *syn_splits["train"], tokenizer,
+            syn_train_noisy, syn_train_clean, tokenizer,
             max_input_length=base_config.max_input_length,
             max_target_length=base_config.max_target_length,
+            precomputed_noise_levels=syn_train_noise,
         )
         stage1_val_ds = NormalizationDataset(
-            *syn_splits["val"], tokenizer,
+            syn_val_noisy, syn_val_clean, tokenizer,
             max_input_length=base_config.max_input_length,
             max_target_length=base_config.max_target_length,
+            precomputed_noise_levels=syn_val_noise,
         )
 
     # =========================================================================
