@@ -27,6 +27,101 @@ preprocessing.py  (the conductor)
 
 ---
 
+## Current methodology update (2026-09-03)
+
+### Configurable correctable-noise probabilities
+
+```python
+def __init__(self, seed: int = 42, probabilities=None):
+    self.rng = random.Random(seed)
+    probabilities = probabilities or {}
+    self.p_abbreviation = probabilities.get("abbreviation", 0.30)
+    self.p_orthographic = probabilities.get("orthographic", 0.20)
+    self.p_elongation = probabilities.get("elongation", 0.15)
+    self.p_punctuation = probabilities.get("punctuation", 0.15)
+    self.p_capitalization = probabilities.get("capitalization", 0.15)
+    self.p_slang = 0.0
+    self.p_vowel_omission = probabilities.get("vowel_omission", 0.20)
+    self.p_emoji_insert = 0.0
+    self.p_char_swap = probabilities.get("char_swap", 0.10)
+```
+
+**▸ Every changed line:**
+
+- `probabilities=None` lets a caller supply a category → probability dictionary.
+- `random.Random(seed)` creates this generator's isolated, repeatable RNG.
+- `probabilities or {}` converts a missing dictionary into an empty one.
+- Each `.get("name", default)` uses the supplied value when present and the shown
+  fallback otherwise.
+- `p_slang = 0.0` and `p_emoji_insert = 0.0` disable those transformations in the
+  current input-only corruption path. They were disabled because slang and emoji
+  should not be treated as mistakes that disappear from the target.
+- The `apply_noise` method still draws `self.rng.random()` for each category and
+  applies a helper only when that draw is below the corresponding probability.
+
+**Example:** with `{"abbreviation": 1.0, "char_swap": 0.0}`, abbreviation is
+always attempted, character swapping is never attempted, and unspecified
+categories use their fallback values.
+
+**Important current limitation:** `DataPipeline.__init__` still constructs
+`TagalogNoiseGenerator(seed=seed)` without passing resolved probabilities. Thus
+this constructor is configurable in isolation, but the main pipeline does not yet
+satisfy spec 011's manifest-driven configuration. Slang, emoji, code-switching,
+and Taglish morphology also do not yet use the planned two-pass “same feature in
+input and target” augmentation path.
+
+### Gold-pair conflict detection
+
+```python
+normalized = {}
+for noisy, clean in zip(noisy_texts, clean_texts):
+    noisy, clean = self.clean_text(noisy), self.clean_text(clean)
+    if noisy in normalized and normalized[noisy] != clean:
+        raise ValueError(f"conflicting clean targets for noisy sentence: {noisy!r}")
+    normalized[noisy] = clean
+noisy_texts = list(normalized.keys())
+clean_texts = list(normalized.values())
+```
+
+**▸ Every line and syntax:**
+
+- `normalized = {}` stores one clean target per normalized noisy sentence.
+- `zip(...)` walks noisy and clean lists as aligned pairs.
+- The tuple assignment cleans both sides on one line.
+- The `if` detects the same noisy input paired with a different clean target.
+- `raise ValueError(...)` stops instead of silently choosing one annotation;
+  `{noisy!r}` uses Python's representation form so whitespace is visible.
+- Assignment keeps the pair. An exact duplicate overwrites the same dictionary
+  entry, effectively deduplicating it.
+- `keys()` and `values()` rebuild aligned lists in insertion order.
+
+**Worked example:** `("ang sarappp ng food ngayon", "ang sarap ng food ngayon")`
+followed by the same noisy sentence with target `"masarap ang food ngayon"` raises
+an error because one source has two incompatible gold answers.
+
+**Privacy warning:** the current exception includes raw sentence text. Spec 010
+requires future eligibility reports to use stable IDs and reason codes without
+copying private text into logs.
+
+### What the loaders enforce today
+
+- The clean synthetic corpus enforces at least four whitespace-separated words
+  and at most 1,024 UTF-8 bytes.
+- The gold loader currently checks non-empty fields, cleans text, removes exact
+  duplicate sources, and rejects conflicting targets.
+- It does **not yet** enforce the four-word/byte rules on gold rows, approval and
+  anonymization columns, exact 15,000 size, reliability CSV coverage, or the
+  deterministic 12,000/1,500/1,500 membership contract. Those are spec-010 tasks.
+- `generate_synthetic_pairs` accepts `target_size=1_000_000`, but an individual
+  caller can choose another size and the function itself does not certify Chapter
+  3 eligibility.
+
+**Defense-ready summary:** “The present code can generate repeatable synthetic
+errors and reject conflicting targets, while the new specs deliberately prevent
+us from claiming full corpus compliance until the external CSV contracts,
+training-derived probability manifest, and exact-size gates are implemented.”
+---
+
 ## `noise_generator.py` — faking Filipino social-media noise
 
 **Role:** Take a *clean* sentence and dirty it, producing a `(noisy, clean)`

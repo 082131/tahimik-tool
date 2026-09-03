@@ -25,6 +25,212 @@ annotation.py stands apart: it scores the gold dataset's reliability, during col
 
 ---
 
+## Current methodology implementation (2026-09-03)
+
+This section supersedes the older method bodies below. It explains the code merged
+in `3dda429` and separates what works now from the remaining spec-014 corrections.
+
+### `metrics.py`: current scoring flow
+
+```python
+def _sentence_gleu_plus(self, prediction: str, reference: str, noisy: str = "") -> float:
+    pred, ref, source = prediction.split(), reference.split(), noisy.split()
+    if not pred or not ref:
+        return 100.0 if pred == ref else 0.0
+    scores = []
+    for order in range(1, 5):
+        pc, rc = self._ngrams(pred, order), self._ngrams(ref, order)
+        if not pc:
+            continue
+        overlap = sum((pc & rc).values())
+        precision = overlap / max(sum(pc.values()), 1)
+        recall = overlap / max(sum(rc.values()), 1)
+        source_overlap = sum((pc & self._ngrams(source, order)).values()) if source else 0
+        penalty = 1.0 - source_overlap / max(sum(pc.values()), 1) if source else 1.0
+        scores.append(min(precision, recall) * max(penalty, 0.0))
+    return 100.0 * sum(scores) / max(len(scores), 1)
+```
+
+**▸ Line-by-line calculation:**
+
+- `.split()` turns the prediction, clean reference, and noisy source into word lists.
+- An empty prediction/reference pair scores `100`; only one empty side scores `0`.
+- `range(1, 5)` evaluates 1-, 2-, 3-, and 4-word n-grams.
+- `_ngrams` returns `Counter` objects. `pc & rc` keeps the minimum count shared
+  by prediction and reference.
+- Precision divides overlap by predicted n-grams; recall divides by reference
+  n-grams. `max(..., 1)` prevents division by zero.
+- `source_overlap` counts prediction n-grams also found in the noisy source.
+- The penalty subtracts that source-copy fraction, then the method multiplies the
+  smaller of precision/recall by the nonnegative penalty.
+- The final line averages available n-gram orders and scales to 0–100.
+
+**Known correctness gap:** this code penalizes *all* source overlap, including text
+that was already correct. For noisy = reference = prediction, overlap is valid but
+the penalty becomes zero. Spec 014 requires penalizing only incorrectly preserved
+source material and giving this clean unchanged triple a perfect score.
+
+```python
+def compute_per_sentence(self, predictions, references, noisy_inputs):
+    return {
+        "gleu_plus": self.compute_gleu_plus(predictions, references, noisy_inputs),
+        "chrf": [self.chrf_scorer.sentence_score(p, [r]).score for p, r in zip(predictions, references)],
+        "err": [self._err(p, r, n) for p, r, n in zip(predictions, references, noisy_inputs)],
+        "alpha_word_accuracy": [self._alpha(p, r) for p, r in zip(predictions, references)],
+    }
+
+def compute_all(self, predictions, references, noisy_inputs):
+    per_sentence = self.compute_per_sentence(predictions, references, noisy_inputs)
+    return {key: float(sum(values) / max(len(values), 1)) for key, values in per_sentence.items()}
+```
+
+`zip` preserves pairing by sentence. Each list comprehension produces one score
+per held-out item, which is what paired bootstrap needs. `compute_all` then averages
+each vector.
+
+**ERR example:** if sentence A has 1 source error and fixes it, its ERR is `1.0`.
+If sentence B has 9 source errors and fixes none, its ERR is `0.0`. The present
+reported mean is `(1 + 0)/2 = 0.5`. Corpus ERR should instead aggregate errors:
+`(10 - 9)/10 = 0.1`. Sentence ERR is valid for paired resampling, but spec 014
+must correct the reported corpus aggregate.
+
+`_alpha` uses one Unicode-aware letters-only regex and is shared by corpus and
+sentence paths. A reference word counts only when it contains letters without
+numbers, underscore, punctuation, or emoji; matching is case-insensitive and
+position-based.
+
+### `efficiency.py`: five warm-ups and repeated measurements
+
+```python
+def benchmark(self, test_dataset, batch_size=1):
+    if batch_size != 1: raise ValueError("Chapter 3 per-sentence latency requires batch_size=1")
+    loader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+    n = len(test_dataset)
+    for _ in range(self.warmup_passes): self._run_inference(loader)
+    timed = []; memory_runs = []
+    for _ in range(self.inference_runs):
+        if self.device.type == "cuda": torch.cuda.reset_peak_memory_stats(self.device)
+        durations = self._run_inference(loader); timed.append(durations)
+        if self.device.type == "cuda": memory_runs.append(torch.cuda.max_memory_allocated(self.device)/(1024*1024))
+```
+
+- Batch size is forced to one so each duration represents one sentence.
+- `shuffle=False` preserves the same test order for every model.
+- The first loop runs warm-ups and discards their values. Configuration currently
+  supplies five warm-ups.
+- The second loop creates independent repeated vectors; configuration currently
+  supplies 20 runs.
+- On CUDA, peak allocation is reset before each full pass and read immediately
+  afterward. Division by `1024*1024` converts bytes to MiB.
+- `_run_inference` synchronizes CUDA before starting and after generation, so the
+  CPU timer includes completed GPU work rather than only asynchronous launch time.
+
+```python
+per_sentence = [sum(row[i] for row in timed)/len(timed) for i in range(n)] if n else []
+run_means = [sum(row)/max(len(row),1) for row in timed]
+```
+
+The first comprehension averages each sentence's latency across runs. The second
+averages all sentences within each run. CPU execution returns an empty memory list
+and `gpu_memory_available=False`, which avoids inventing GPU measurements.
+
+**Remaining gap:** memory is summarized as maximum MiB per model. Chapter 3 also
+needs model mean/standard deviation and paired-difference median/IQR in GB, tested
+against exact reset/read order. Spec 014 owns those corrections.
+
+### `statistical_tests.py`: bootstrap
+
+```python
+observed = (b.mean() - a.mean()) if higher_is_better else (a.mean() - b.mean())
+for _ in range(self.n_bootstrap):
+    idx = self.rng.randint(0, len(a), len(a))
+    deltas.append((b[idx].mean() - a[idx].mean()) if higher_is_better else (a[idx].mean() - b[idx].mean()))
+lower_tail = (1 + np.sum(deltas <= 0)) / (self.n_bootstrap + 1)
+upper_tail = (1 + np.sum(deltas >= 0)) / (self.n_bootstrap + 1)
+p = min(1.0, 2 * min(lower_tail, upper_tail))
+lo, hi = np.percentile(deltas, [2.5, 97.5])
+```
+
+- Arrays `a` and `b` must be non-empty and equal length.
+- Positive `observed` always favors model B: for accuracy it calculates B−A; for
+  latency (lower is better) it calculates A−B.
+- One random index vector selects the same resampled sentences from both models,
+  which preserves pairing.
+- The add-one numerator/denominator prevents a literal zero p-value.
+- Twice the smaller tail is a two-sided p-value, capped at one.
+- The 2.5th and 97.5th percentiles form the bootstrap 95% interval.
+- The returned `significant` is true only when raw `p < alpha` and the interval
+  excludes zero. The full experiment constructs this class with 1,000 resamples.
+
+### Wilcoxon and the current effect-size gap
+
+```python
+d = b - a
+stat, p = (0.0, 1.0) if np.all(d == 0) else stats.wilcoxon(a, b, alternative="two-sided")
+nonzero = d[d != 0]
+rank_biserial = float((np.sum(nonzero > 0) - np.sum(nonzero < 0)) / len(nonzero)) if len(nonzero) else 0.0
+```
+
+The two-sided Wilcoxon call correctly treats the measurements as paired and avoids
+SciPy's all-zero failure by returning `p=1`. But the variable named
+`rank_biserial` only compares counts of positive and negative differences. The
+matched-pairs rank-biserial required by Chapter 3 must rank absolute nonzero
+differences, sum positive and negative ranks, then compute
+`(R_positive - R_negative)/(R_positive + R_negative)`. The current code also
+reports each model's median/IQR rather than the median/IQR of paired differences.
+
+**Tiny example:** differences `[1, 2, -100]` give the present sign-count effect
+`(2-1)/3 = 0.333`. Signed ranks are `+1`, `+2`, and `-3`, so the required effect is
+`(3-3)/6 = 0`. Magnitude ranks change the conclusion.
+
+### Holm–Bonferroni
+
+```python
+m = len(p_values); ordered = sorted(p_values, key=lambda x: x[1])
+results = []; keep = True; previous = 0.0
+for rank, (name, raw) in enumerate(ordered, 1):
+    threshold = alpha / (m-rank+1)
+    reject = keep and raw < threshold
+    keep = reject
+    adjusted = min(1.0, max(previous, raw * (m-rank+1)))
+    previous = adjusted
+```
+
+- Tests are sorted from smallest p-value to largest.
+- The threshold becomes less strict as fewer hypotheses remain.
+- `keep` implements step-down stopping: after the first failure, all later tests
+  remain not significant.
+- `max(previous, ...)` makes adjusted p-values monotonic; `min(1.0, ...)` keeps
+  them within the probability range.
+
+`run_full_comparison` currently puts eight accuracy tests (two TAHIMIK comparisons
+× four metrics) in one accuracy family. It puts all latency and memory tests for
+both comparisons into one global efficiency family. Spec 014 requires a separate
+two-test efficiency family—latency plus memory—for each model comparison.
+
+### `annotation.py`: what is and is not connected
+
+`compute(...)` can call the `krippendorff` library with a chosen measurement
+level, but its default is `"ratio"`. `compute_from_normalizations(...)` converts
+whole normalized strings into continuous edit-distance ratios and calls ratio
+alpha. The full experiment does not currently load the external long-format
+binary-label CSV or compute nominal alpha separately for each noise category.
+Spec 010 defines that CSV; spec 014 requires three-annotator category matrices and
+a hard full-run stop when any category has alpha below `0.80`.
+
+### Easy defense summary
+
+- **Bootstrap:** “Resample the same sentences for both models 1,000 times and ask
+  whether the improvement consistently stays away from zero.”
+- **Wilcoxon:** “Rank the sizes of 20 paired memory differences and test whether
+  their positive and negative ranks are balanced.”
+- **Holm:** “Correct the p-values from smallest upward so multiple tests do not
+  create false discoveries.”
+- **Current honesty statement:** “The pipeline runs and several statistical pieces
+  are present, but exact GLEU+, corpus ERR, rank-biserial, family composition, and
+  nominal per-category alpha remain explicitly unclaimed until spec 014 is done.”
+---
+
 ## Terms & abbreviations used across this folder
 | Term | Full form / plain meaning |
 |---|---|

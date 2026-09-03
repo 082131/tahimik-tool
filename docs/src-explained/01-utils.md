@@ -6,12 +6,119 @@
 1. `__init__.py` — re-exports
 2. `byte_encoding.py` — text ↔ ByT5 byte IDs
 3. `logging_utils.py` — progress messages
+4. `reproducibility.py` — metadata and deterministic seeds
 
 > **How to read this doc:** each file starts with **Where this fits in TAHIMIK**
 > (its real job in the system + what breaks without it). Then, per method, a
 > *Variables at a glance* table, an **Example** (concrete input → output), and a
 > line-by-line pass where every code block opens with **▸ What this block does**.
 
+---
+
+## Current addition (2026-09-03): `reproducibility.py`
+
+**Where this fits:** `train.py` and `run_experiment.py` use this module to identify
+the code/environment that produced an artifact and to seed
+random operations. It is a basic implementation of reproducibility. Spec 013 still
+requires complete CUDA/GPU fields, canonical fingerprints, eligibility reasons,
+and the same schema in standalone evaluation and benchmarking.
+
+### Imports and Git helper
+
+```python
+import importlib.metadata
+import platform
+import subprocess
+from datetime import datetime, timezone
+
+def _git(command):
+    try: return subprocess.run(["git", *command], capture_output=True, text=True, check=True).stdout.strip()
+    except Exception: return "unknown"
+```
+
+**▸ Every line and syntax:**
+
+- `importlib.metadata` reads installed-package versions; `platform` identifies
+  Python and the operating system; `subprocess` launches Git; `datetime` and
+  `timezone` create an unambiguous UTC time.
+- `_git` starts with `_` because it is an internal helper.
+- `["git", *command]` unpacks the supplied list. For
+  `["rev-parse", "HEAD"]`, it creates `["git", "rev-parse", "HEAD"]`.
+- `capture_output=True` captures output, `text=True` decodes it, and `check=True`
+  converts a non-zero Git exit into an exception.
+- `.stdout.strip()` returns Git's standard output without outside whitespace.
+- `except Exception` keeps optional metadata collection from crashing when Git is
+  unavailable; the explicit fallback is `"unknown"`.
+
+### Metadata collector
+
+```python
+def collect_run_metadata(seed=None, config=None):
+    dirty = bool(_git(["status", "--porcelain"]))
+    packages = {}
+    for name in ("numpy", "scipy", "torch", "transformers", "sacrebleu", "nltk", "editdistance"):
+        try: packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError: pass
+    return {"timestamp_utc": datetime.now(timezone.utc).isoformat(), "git_sha": _git(["rev-parse", "HEAD"]), "dirty": dirty, "seed": seed, "resolved_config": config or {}, "python": platform.python_version(), "platform": platform.platform(), "packages": packages}
+```
+
+| Name | Plain meaning |
+|---|---|
+| `seed` | number controlling repeatable random choices |
+| `config` | settings already resolved by the caller |
+| `dirty` | whether the working tree contains uncommitted changes |
+| `packages` | library-name → installed-version dictionary |
+
+**▸ Every line and syntax:**
+
+- Optional arguments default to `None`.
+- `git status --porcelain` is empty in a clean tree, so `bool(...)` turns it into
+  `False`; any listed change becomes `True`.
+- `{}` creates the version dictionary.
+- The loop visits the libraries that materially affect training or evaluation.
+- The `try` stores each version. `PackageNotFoundError: pass` skips an absent
+  optional library.
+- The returned dictionary records UTC ISO time, commit SHA, dirty state, seed,
+  caller-supplied config, Python/platform versions, and package versions.
+- `config or {}` substitutes an empty dictionary for `None`. It does not yet
+  recursively normalize complex objects, so this is not the final spec-013 schema.
+
+**Example:** `collect_run_metadata(42, {"batch_size": 8})` records seed `42` and
+batch size `8` alongside the actual Git/environment values. If Git is unavailable,
+`git_sha` is `"unknown"`; a future strict eligibility rule must reject that result
+as thesis evidence even though development can continue.
+
+### Deterministic execution
+
+```python
+def configure_determinism(seed: int):
+    import os, random
+    import numpy as np
+    random.seed(seed); np.random.seed(seed); os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)
+        torch.use_deterministic_algorithms(True)
+        return True
+    except ImportError: return False
+```
+
+**▸ Every line and syntax:**
+
+- `seed: int` documents that the input is an integer.
+- Local imports delay loading dependencies until this function is used.
+- The semicolon-separated statements seed Python, seed NumPy, and set NVIDIA
+  cuBLAS's deterministic workspace value only when the environment has no value.
+- `torch.manual_seed` seeds PyTorch. When CUDA exists, `manual_seed_all` covers
+  every visible GPU.
+- `use_deterministic_algorithms(True)` requests deterministic operations and
+  raises when only a nondeterministic implementation is available.
+- `True` means PyTorch was configured; `False` means PyTorch was not importable.
+
+**One-sentence defense answer:** “The code stores the seed and environment, seeds
+Python, NumPy, and PyTorch, and asks PyTorch to use deterministic algorithms so a
+run can be reproduced.”
 ---
 
 ## `__init__.py`

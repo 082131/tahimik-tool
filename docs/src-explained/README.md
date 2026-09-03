@@ -4,6 +4,13 @@ This folder documents **every file in `src/`**, written for someone who has been
 away from the code for months (or is new to deep learning). Each library and
 concept is explained the first time it appears.
 
+> **Current-code note (2026-09-03):** The methodology-compliance changes from
+> commit `3dda429` are explained in dated update sections in `01-utils.md`,
+> `02-data.md`, `04-training.md`, and `05-evaluation.md`. Those sections take
+> precedence where an older walkthrough shows the previous implementation.
+> Specs 010–014 describe additional work; a behavior is not implemented merely
+> because it appears in a specification.
+
 ## How to read this
 
 Read the files in **flow order** — the order data actually moves through the
@@ -12,7 +19,7 @@ system during an experiment:
 | # | Doc | Folder | What it does |
 |---|-----|--------|--------------|
 | 0 | *(concepts)* | — | The vocabulary primer below |
-| 1 | [01-utils.md](01-utils.md) | `src/utils/` | Shared toolbox (byte encoding, logging) |
+| 1 | [01-utils.md](01-utils.md) | `src/utils/` | Shared toolbox (byte encoding, logging, reproducibility) |
 | 2 | [02-data.md](02-data.md) | `src/data/` | Turn raw text into training tensors |
 | 3 | [03-models.md](03-models.md) | `src/models/` | The three neural network variants |
 | 4 | [04-training.md](04-training.md) | `src/training/` | The loss + the training loop |
@@ -24,7 +31,19 @@ system during an experiment:
 > `src/models` builds three models that compress the input differently →
 > `src/training` teaches them with a four-part loss →
 > `src/evaluation` measures which model is best and whether the difference is real.
-> `src/utils` is the shared toolbox everything borrows from.
+> `src/utils` is the shared toolbox everything borrows from and records the
+> seed, software environment, Git revision, and deterministic settings.
+
+## Implemented now versus specified next
+
+The repository currently has source-aware metric inputs, paired bootstrap,
+Wilcoxon output, Holm adjustment, repeated efficiency observations, configurable
+correctable-noise probabilities, and basic run metadata. The complete contracts
+for imported annotation CSVs, training-derived probability manifests, best
+Stage-1 checkpoint restoration, unified provenance, nominal per-category alpha,
+and exact statistical regression coverage are defined in specs 010–014 but are
+not all implemented yet. Passing the current smoke tests shows that the existing
+code runs; it does not by itself make a real Chapter 3 experiment eligible.
 
 ---
 
