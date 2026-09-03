@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tahimik.local/schemas/probability-manifest-v1.json",
+  "title": "TAHIMIK Probability Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_id", "source", "seed", "categories", "resource_versions", "ready"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gold_fingerprint", "training_split_fingerprint"],
+      "properties": {
+        "gold_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "training_split_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "seed": {"type": "integer"},
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["category", "group", "positive_count", "total_count", "observed_rate", "lower_bound", "upper_bound", "resolved_probability"],
+        "properties": {
+          "category": {"type": "string", "minLength": 1},
+          "group": {"enum": ["preserved_augmentations", "correctable_noise"]},
+          "positive_count": {"type": "integer", "minimum": 0},
+          "total_count": {"type": "integer", "minimum": 1},
+          "observed_rate": {"type": "number", "minimum": 0, "maximum": 1},
+          "lower_bound": {"type": "number", "minimum": 0, "maximum": 1},
+          "upper_bound": {"type": "number", "minimum": 0, "maximum": 1},
+          "resolved_probability": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "resource_versions": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "ready": {"type": "boolean"}
+  }
+}

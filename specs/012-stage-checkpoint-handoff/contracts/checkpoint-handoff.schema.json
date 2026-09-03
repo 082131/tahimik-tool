@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage checkpoint handoff record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_checkpoint_id", "source_stage", "source_epoch", "source_validation_loss", "target_stage", "restored", "model_state_fingerprint"],
+  "properties": {
+    "source_checkpoint_id": {"type": "string", "minLength": 1},
+    "source_stage": {"const": "stage1"},
+    "source_epoch": {"type": "integer", "minimum": 1},
+    "source_validation_loss": {"type": "number"},
+    "target_stage": {"const": "stage2"},
+    "restored": {"const": true},
+    "model_state_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

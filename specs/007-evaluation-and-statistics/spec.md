@@ -195,3 +195,7 @@ expects exactly the four manuscript metric keys.
 - [ ] T003 **HIGH** Add median difference in GB, interquartile range, and matched-pairs rank-biserial effect size to `wilcoxon_test`, per FR-008. Currently reports means where the manuscript specifies medians (partial)
 - [ ] T004 [P] Write `tests/test_statistical_tests.py` covering SC-003 through SC-005 — especially a constructed case with a hand-computed two-tailed p-value, which would have caught F1 (missing)
 - [ ] T005 [P] Write `tests/test_metrics.py` covering SC-001 and SC-002 (missing)
+
+## 009 compliance integration
+
+The executable implementation now follows `specs/009-methodology-compliance`: source-aware GLEU+ is calculated per sentence using noisy input, bootstrap inference is two-tailed with add-one smoothing and CI gating, and the prescribed comparisons are ByT5-vs-TAHIMIK and MrT5-vs-TAHIMIK. Latency is paired per sentence; GPU memory is collected independently per timed run and is omitted on CPU. Holm-Bonferroni is step-down with adjusted p-values. Gold conflicts are rejected, exact duplicates collapse, and synthetic slang/emoji/code-switching/Taglish morphology are protected. The annotator website and human annotation remain external deliverables.

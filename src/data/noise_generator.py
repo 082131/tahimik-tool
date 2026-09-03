@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Synthetic Noise Generation Pipeline for Tagalog and Taglish Text
 #
 # Generates noisy-to-clean sentence pairs by applying controlled noise
@@ -7,12 +7,12 @@
 # TagNorm (Agapito et al., 2021) and Karpukhin et al. (2019).
 #
 # The 9 noise categories:
-#   1. Abbreviations and shortenings (e.g., "salamat" → "slmt")
-#   2. Orthographic variation (e.g., "dito" → "d2", phonetic spelling)
-#   3. Character elongation (e.g., "grabe" → "grabeeee")
-#   4. Punctuation variation (e.g., "!!!" → "!!!!!!!!")
+#   1. Abbreviations and shortenings (e.g., "salamat" â†’ "slmt")
+#   2. Orthographic variation (e.g., "dito" â†’ "d2", phonetic spelling)
+#   3. Character elongation (e.g., "grabe" â†’ "grabeeee")
+#   4. Punctuation variation (e.g., "!!!" â†’ "!!!!!!!!")
 #   5. Capitalization variation (e.g., random CAPS)
-#   6. Slang and netspeak (e.g., "idol" → "lodi")
+#   6. Slang and netspeak (e.g., "idol" â†’ "lodi")
 #   7. Taglish morphology patterns (e.g., "nag-download")
 #   8. Emoji-based sentiment markers (inserting emojis)
 #   9. Code-switching (mixing Tagalog and English)
@@ -29,7 +29,7 @@ import random
 import re
 from typing import List, Tuple
 
-# ── Common Filipino abbreviation dictionary ─────────────────────────────
+# â”€â”€ Common Filipino abbreviation dictionary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Maps standard Tagalog words to their abbreviated social media forms.
 # Sourced from Filipino netspeak conventions documented in TagNorm.
 ABBREVIATION_MAP = {
@@ -71,12 +71,12 @@ ABBREVIATION_MAP = {
     "kanina": ["knina", "knna"],
 }
 
-# ── Vowel sets for vowel omission noise ─────────────────────────────────
+# â”€â”€ Vowel sets for vowel omission noise â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 VOWELS = set("aeiouAEIOU")
 
-# ── Slang / Netspeak dictionary ─────────────────────────────────────────
+# â”€â”€ Slang / Netspeak dictionary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Filipino social media slang where the normalized form should be kept.
-# These are NOT corrected during normalization — they are preserved.
+# These are NOT corrected during normalization â€” they are preserved.
 SLANG_MAP = {
     "idol": "lodi",
     "pare": "pre",
@@ -89,7 +89,7 @@ SLANG_MAP = {
     "maganda": "ganda",
 }
 
-# ── Orthographic / phonetic substitution patterns ───────────────────────
+# â”€â”€ Orthographic / phonetic substitution patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ORTHO_SUBSTITUTIONS = {
     "dito": ["d2", "dto"],
     "diyan": ["d yan", "dyan"],
@@ -101,10 +101,10 @@ ORTHO_SUBSTITUTIONS = {
     "nang": ["ng"],
 }
 
-# ── Common emoji sentiment markers ─────────────────────────────────────
-POSITIVE_EMOJIS = ["😊", "😂", "❤️", "🥰", "💯", "🙏", "✨", "🔥", "💪", "😍"]
-NEGATIVE_EMOJIS = ["😢", "😭", "💔", "😤", "😡", "🥺", "😒", "😩"]
-NEUTRAL_EMOJIS = ["👀", "🤔", "😅", "🙃", "👁️", "💀", "☠️"]
+# â”€â”€ Common emoji sentiment markers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+POSITIVE_EMOJIS = ["ðŸ˜Š", "ðŸ˜‚", "â¤ï¸", "ðŸ¥°", "ðŸ’¯", "ðŸ™", "âœ¨", "ðŸ”¥", "ðŸ’ª", "ðŸ˜"]
+NEGATIVE_EMOJIS = ["ðŸ˜¢", "ðŸ˜­", "ðŸ’”", "ðŸ˜¤", "ðŸ˜¡", "ðŸ¥º", "ðŸ˜’", "ðŸ˜©"]
+NEUTRAL_EMOJIS = ["ðŸ‘€", "ðŸ¤”", "ðŸ˜…", "ðŸ™ƒ", "ðŸ‘ï¸", "ðŸ’€", "â˜ ï¸"]
 
 
 class TagalogNoiseGenerator:
@@ -121,20 +121,21 @@ class TagalogNoiseGenerator:
         # Possible output: "mgndng umga sa lhat!"
     """
 
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, probabilities=None):
         self.rng = random.Random(seed)
 
         # Per-category application probabilities.
         # Higher values produce noisier synthetic data.
-        self.p_abbreviation = 0.30
-        self.p_orthographic = 0.20
-        self.p_elongation = 0.15
-        self.p_punctuation = 0.15
-        self.p_capitalization = 0.15
-        self.p_slang = 0.10
-        self.p_vowel_omission = 0.20
-        self.p_emoji_insert = 0.10
-        self.p_char_swap = 0.10
+        probabilities = probabilities or {}
+        self.p_abbreviation = probabilities.get("abbreviation", 0.30)
+        self.p_orthographic = probabilities.get("orthographic", 0.20)
+        self.p_elongation = probabilities.get("elongation", 0.15)
+        self.p_punctuation = probabilities.get("punctuation", 0.15)
+        self.p_capitalization = probabilities.get("capitalization", 0.15)
+        self.p_slang = 0.0
+        self.p_vowel_omission = probabilities.get("vowel_omission", 0.20)
+        self.p_emoji_insert = 0.0
+        self.p_char_swap = probabilities.get("char_swap", 0.10)
 
     def apply_noise(self, clean_sentence: str) -> str:
         """
@@ -189,7 +190,7 @@ class TagalogNoiseGenerator:
 
         return noisy
 
-    # ── Individual noise functions ──────────────────────────────────────
+    # â”€â”€ Individual noise functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _apply_abbreviation(self, text: str) -> str:
         """Replace random words with their abbreviated forms."""
@@ -208,9 +209,9 @@ class TagalogNoiseGenerator:
         """
         Remove vowels from random words to simulate texting shortcuts.
 
-        Filipino texting frequently drops vowels: "punta" → "pnta".
+        Filipino texting frequently drops vowels: "punta" â†’ "pnta".
         Only interior vowels are dropped (not the first character),
-        and short words (≤3 chars) are left intact.
+        and short words (â‰¤3 chars) are left intact.
         """
         words = text.split()
         for i, word in enumerate(words):
@@ -241,7 +242,7 @@ class TagalogNoiseGenerator:
         Repeat characters for emotional emphasis.
 
         Filipino social media frequently uses elongation for intensity:
-        "grabe" → "grabeeee", "ang sarap" → "ang saraaap".
+        "grabe" â†’ "grabeeee", "ang sarap" â†’ "ang saraaap".
         """
         words = text.split()
         # Pick 1-2 words to elongate
@@ -375,3 +376,6 @@ class TagalogNoiseGenerator:
                     noisy_retry = self.apply_noise(clean)
                     pairs.append((noisy_retry, clean))
         return pairs
+
+
+

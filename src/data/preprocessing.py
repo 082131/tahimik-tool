@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Data Preprocessing and Pipeline Management
 #
 # Handles loading, cleaning, splitting, and preparing data for the
@@ -42,12 +42,12 @@ class DataPipeline:
         seed: Random seed for reproducibility.
     """
 
-    def __init__(self, config, seed: int = 42):
+    def __init__(self, config=None, seed: int = 42):
         self.config = config
         self.rng = random.Random(seed)
         self.noise_gen = TagalogNoiseGenerator(seed=seed)
 
-    # ── Data Loading ────────────────────────────────────────────────────
+    # â”€â”€ Data Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def load_clean_corpus(self, filepath: str) -> List[str]:
         """
@@ -89,10 +89,10 @@ class DataPipeline:
                         if text:
                             sentences.append(text.strip())
 
-        # Filter by minimum word count (manuscript: ≥4 words)
+        # Filter by minimum word count (manuscript: â‰¥4 words)
         sentences = [s for s in sentences if len(s.split()) >= 4]
 
-        # Filter by maximum byte length (manuscript: ≤1024 bytes)
+        # Filter by maximum byte length (manuscript: â‰¤1024 bytes)
         sentences = [s for s in sentences if len(s.encode("utf-8")) <= 1024]
 
         logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")
@@ -136,10 +136,18 @@ class DataPipeline:
                     noisy_texts.append(noisy)
                     clean_texts.append(clean)
 
+        normalized = {}
+        for noisy, clean in zip(noisy_texts, clean_texts):
+            noisy, clean = self.clean_text(noisy), self.clean_text(clean)
+            if noisy in normalized and normalized[noisy] != clean:
+                raise ValueError(f"conflicting clean targets for noisy sentence: {noisy!r}")
+            normalized[noisy] = clean
+        noisy_texts = list(normalized.keys())
+        clean_texts = list(normalized.values())
         logger.info(f"Loaded {len(noisy_texts)} gold standard pairs from {filepath}")
         return noisy_texts, clean_texts
 
-    # ── Cleaning ────────────────────────────────────────────────────────
+    # â”€â”€ Cleaning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def clean_text(self, text: str) -> str:
         """
@@ -156,7 +164,7 @@ class DataPipeline:
         text = " ".join(text.split())
         return text.strip()
 
-    # ── Synthetic Data Generation ───────────────────────────────────────
+    # â”€â”€ Synthetic Data Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def generate_synthetic_pairs(
         self,
@@ -209,7 +217,7 @@ class DataPipeline:
         logger.info(f"Generated {len(noisy_texts)} synthetic pairs")
         return noisy_texts, clean_texts, noise_levels
 
-    # ── Splitting ───────────────────────────────────────────────────────
+    # â”€â”€ Splitting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def split_data(
         self,
@@ -268,7 +276,7 @@ class DataPipeline:
         return splits
 
 
-# ── Helper functions ────────────────────────────────────────────────────
+# â”€â”€ Helper functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _replace_mentions(text: str) -> str:
     """Replace @username patterns with @ANON."""
@@ -279,5 +287,8 @@ def _replace_urls(text: str) -> str:
     """Replace URLs with <URL>."""
     url_pattern = r"https?://\S+|www\.\S+"
     return re.sub(url_pattern, "<URL>", text)
+
+
+
 
 

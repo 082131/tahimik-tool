@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Full Experiment Pipeline for TAHIMIK
 #
 # Runs the complete experiment: trains all three model variants, evaluates
@@ -47,6 +47,7 @@ from src.evaluation.metrics import NormalizationMetrics
 from src.evaluation.efficiency import EfficiencyBenchmark
 from src.evaluation.statistical_tests import StatisticalAnalysis
 from src.utils.logging_utils import setup_logger
+from src.utils.reproducibility import collect_run_metadata, configure_determinism
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -75,6 +76,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    configure_determinism(args.seed)
 
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -83,10 +85,10 @@ def main():
     device = torch.device(args.device)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # ── Shared tokenizer ────────────────────────────────────────────────
+    # â”€â”€ Shared tokenizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
 
-    # ── Prepare data (shared across all variants) ───────────────────────
+    # â”€â”€ Prepare data (shared across all variants) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     base_config = ByT5Config()
     base_config.seed = args.seed
     pipeline = DataPipeline(base_config, seed=args.seed)
@@ -145,9 +147,9 @@ def main():
             max_target_length=base_config.max_target_length,
         )
 
-    # ══════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     # Train + Evaluate each variant
-    # ══════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     all_metrics = {}
     all_per_sentence = {}
     all_gpu_memory = {}
@@ -165,7 +167,7 @@ def main():
         config.seed = args.seed
         config.checkpoint_dir = os.path.join(args.output_dir, "checkpoints")
 
-        # ── Train ───────────────────────────────────────────────────────
+        # â”€â”€ Train â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         model = ModelClass(config)
 
         loss_fn = TAHIMIKLoss(
@@ -183,7 +185,7 @@ def main():
             stage2_val=stage2_val_ds,
         )
 
-        # ── Evaluate ────────────────────────────────────────────────────
+        # â”€â”€ Evaluate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         model.eval()
         model.to(device)
 
@@ -213,47 +215,10 @@ def main():
         all_metrics[variant_name] = results
         logger.info(f"  {variant_name} results: {results}")
 
-        # Compute per-sentence scores for bootstrap testing
-        per_sentence = {
-            "gleu_plus": [],
-            "chrf": [],
-            "err": [],
-            "alpha_word_accuracy": [],
-        }
+        # Compute the exact shared per-sentence metric definitions.
+        per_sentence = metrics_calculator.compute_per_sentence(predictions, test_clean, test_noisy)
 
-        bleu_scorer = metrics_calculator.bleu_scorer
-        import editdistance
-        import re
-        alpha_pat = re.compile(r"^[a-zA-Z]+$")
-
-        for pred, ref, noisy in zip(predictions, test_clean, test_noisy):
-            per_sentence["gleu_plus"].append(
-                bleu_scorer.sentence_score(pred, [ref]).score
-            )
-            per_sentence["chrf"].append(
-                metrics_calculator.chrf_scorer.sentence_score(pred, [ref]).score
-            )
-            eb = editdistance.eval(noisy, ref)
-            ea = editdistance.eval(pred, ref)
-            per_sentence["err"].append(
-                (eb - ea) / eb if eb > 0 else (1.0 if ea == 0 else 0.0)
-            )
-
-            ref_words = ref.split()
-            pred_words = pred.split()
-            correct = total = 0
-            for i, rw in enumerate(ref_words):
-                if alpha_pat.match(rw):
-                    total += 1
-                    if i < len(pred_words) and pred_words[i].lower() == rw.lower():
-                        correct += 1
-            per_sentence["alpha_word_accuracy"].append(
-                correct / total if total > 0 else 1.0
-            )
-
-        all_per_sentence[variant_name] = per_sentence
-
-        # ── Efficiency Benchmark ────────────────────────────────────────
+        # Efficiency Benchmark
         bench = EfficiencyBenchmark(
             model=model, tokenizer=tokenizer, device=device,
             num_beams=config.num_beams,
@@ -263,14 +228,14 @@ def main():
         eff_results = bench.benchmark(test_dataset, batch_size=1)
         all_metrics[variant_name]["efficiency"] = eff_results
 
-        # Collect per-run GPU memory for Wilcoxon test
-        all_gpu_memory[variant_name] = [
-            eff_results["peak_gpu_memory_mb"]
-        ] * config.inference_runs
+        # Collect independent per-run GPU memory observations; CPU yields an empty list.
+        all_gpu_memory[variant_name] = eff_results.get("peak_gpu_memory_runs_mb", [])
+        per_sentence["inference_time"] = eff_results.get("per_sentence_time_seconds", [])
+        all_per_sentence[variant_name] = per_sentence
 
-    # ══════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     # Statistical Testing
-    # ══════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     logger.info(f"\n{'='*70}")
     logger.info("  STATISTICAL ANALYSIS")
     logger.info(f"{'='*70}")
@@ -283,7 +248,7 @@ def main():
         gpu_memory_runs=all_gpu_memory,
     )
 
-    # ── Save everything ─────────────────────────────────────────────────
+    # â”€â”€ Save everything â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     final_output = {
         "metrics": {k: v for k, v in all_metrics.items()},
         "statistical_tests": {
@@ -310,3 +275,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
