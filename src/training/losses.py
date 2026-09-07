@@ -1,30 +1,10 @@
-# =============================================================================
-# Loss Functions for TAHIMIK Training
-#
-# The total loss is a weighted sum of four components (from the manuscript's
-# Loss Computation section):
-#
-#   L = L_CE + w_rate * L_rate + w_attn_reg * L_attn_reg + L_NE
-#
-# Components:
-#   L_CE       — Cross-entropy between predicted and target byte sequences.
-#               Standard seq2seq loss; already computed by the model.
-#
-#   L_rate     — Per-sentence deletion rate loss. Penalizes deviation of the
-#               actual deletion rate from the target:
-#               - MrT5: target = fixed_deletion_target (e.g. 0.5)
-#               - TAHIMIK: target = d_max * (1 - n_i), noise-adaptive
-#
-#   L_attn_reg — Attention regularizer. Prevents attention scores from
-#               inflating to circumvent the soft masking of the delete gate
-#               (MrT5 Appendix D). Penalizes large attention weights on
-#               positions that the gate marked for deletion.
-#
-#   L_NE       — Noise estimator loss. MSE between predicted noise score n
-#               and ground-truth n* (byte-level edit distance ratio).
-#               This is the ONLY signal that trains
-#               the noise estimator — n is detached everywhere else.
-# =============================================================================
+# Combined loss computation:
+# L = L_CE + w_rate * L_rate + w_attn_reg * L_attn_reg + L_NE
+# L_CE: cross-entropy loss
+# L_rate: MSE between actual and target deletion rate
+# L_attn_reg: gate commitment penalty 4 * p * (1 - p)
+# L_NE: MSE between predicted noise n and ground truth n*
+
 
 import torch
 import torch.nn as nn
@@ -80,7 +60,7 @@ class TAHIMIKLoss(nn.Module):
         """
         losses = {}
 
-        # ── L_CE: Cross-entropy (always present) ───────────────────────
+        # ── L_CE: Cross-entropy ───────────────────────
         l_ce = model_outputs["loss"]
         losses["l_ce"] = l_ce
         total = l_ce
@@ -113,18 +93,16 @@ class TAHIMIKLoss(nn.Module):
             # Maximal (1.0) at p=0.5, zero at p=0 and p=1, so it is SYMMETRIC:
             # it expresses no preference between keeping and deleting. Which
             # way a byte goes is decided by L_rate and L_CE.
-            #
-            # NOTE (deviation from the manuscript): MrT5 Appendix D defines
-            # this term over attention weights, penalising attention paid to
-            # deleted positions, which requires materialising per-head
-            # attention matrices. The symmetric form below serves the same
-            # purpose — stopping the gate from hedging — at negligible cost.
-            # The previous implementation penalised (1 - gate/k)^2, which is
-            # minimised by sending EVERY gate to k, i.e. deleting the whole
-            # sequence; it was the only gradient reaching the gate.
+            
             keep_prob = model_outputs["keep_prob"]
+            penalty = 4.0 * keep_prob * (1.0 - keep_prob)
 
-            l_attn_reg = (4.0 * keep_prob * (1.0 - keep_prob)).mean()
+            if "gate_attention_mask" in model_outputs:
+                mask = model_outputs["gate_attention_mask"].to(keep_prob.dtype)
+                l_attn_reg = (penalty * mask).sum() / mask.sum().clamp_min(1.0)
+            else:
+                l_attn_reg = penalty.mean()
+
             losses["l_attn_reg"] = l_attn_reg
             total = total + self.w_attn_reg * l_attn_reg
 

@@ -312,7 +312,10 @@ def test_hard_deletion_keeps_exactly_the_marked_positions(batch):
     kept = ((torch.rand(BATCH, SEQ) > 0.5).float() * mask)
 
     gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False)
-    compressed, new_mask = gate.apply_hard_deletion(hidden, kept)
+    deletion_result = gate.apply_hard_deletion(hidden, kept)
+    compressed = deletion_result.hidden_states
+    new_mask = deletion_result.attention_mask
+    source_positions = deletion_result.source_positions
 
     for i in range(BATCH):
         idx = kept[i].nonzero(as_tuple=True)[0]
@@ -321,6 +324,9 @@ def test_hard_deletion_keeps_exactly_the_marked_positions(batch):
         assert new_mask[i, n:].sum() == 0, f"row {i}: mask marks padding as real"
         assert torch.allclose(compressed[i, :n], hidden[i, idx]), (
             f"row {i}: compressed states are not the kept states in order"
+        )
+        assert torch.equal(source_positions[i, :n], idx), (
+            f"row {i}: source positions do not match kept indices"
         )
 
 
@@ -334,8 +340,69 @@ def test_hard_deletion_survives_a_fully_deleted_sentence(batch):
     kept[1, :5] = 1.0          # one row keeps something, the rest keep nothing
 
     gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False)
-    compressed, new_mask = gate.apply_hard_deletion(hidden, kept)
+    deletion_result = gate.apply_hard_deletion(hidden, kept)
+    compressed = deletion_result.hidden_states
+    new_mask = deletion_result.attention_mask
 
     assert compressed.size(1) >= 1, "compressed sequence length collapsed to zero"
     assert new_mask[0].sum() == 0, "an all-deleted row reports surviving positions"
     assert new_mask[1].sum() == 5, "the row that kept 5 positions did not keep 5"
+
+
+def test_attention_regularizer_ignores_padding():
+    """Gate regularizer must not be diluted by trailing padding tokens."""
+    loss_fn = TAHIMIKLoss(w_rate=0.0, w_attn_reg=1.0, use_compression=True, noise_adaptive=False)
+    
+    real = torch.tensor([[0.2, 0.8]])
+    padded = torch.tensor([[0.2, 0.8, 0.0, 0.0, 0.0]])
+    
+    dummy_logits = torch.randn(1, 2, 10)
+    dummy_labels = torch.tensor([[1, 2]])
+    
+    short_outputs = {
+        "logits": dummy_logits,
+        "loss": torch.tensor(0.0),
+        "keep_prob": real,
+        "deletion_rate": torch.tensor([0.5]),
+        "fixed_deletion_target": 0.5,
+        "gate_attention_mask": torch.tensor([[1.0, 1.0]]),
+    }
+    long_outputs = {
+        "logits": dummy_logits,
+        "loss": torch.tensor(0.0),
+        "keep_prob": padded,
+        "deletion_rate": torch.tensor([0.5]),
+        "fixed_deletion_target": 0.5,
+        "gate_attention_mask": torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0]]),
+    }
+    
+    loss_short = loss_fn(short_outputs)
+    loss_long = loss_fn(long_outputs)
+    assert loss_short["l_attn_reg"].item() == pytest.approx(loss_long["l_attn_reg"].item(), rel=1e-5)
+
+
+def test_adaptive_coefficient_remains_non_negative():
+    """Optimizing raw_cn to large negative values must keep exposed coefficient >= 0."""
+    gate = DeleteGate(hidden_dim=DIM, noise_adaptive=True)
+    gate.eval()
+    assert gate.adaptive_coefficient.item() > 0.0
+
+    # Under positive adaptive_coefficient, higher noise increases keep probability
+    hidden = torch.randn(1, 4, DIM).repeat(2, 1, 1)
+    mask = torch.ones(2, 4)
+    noise = torch.tensor([0.9, 0.1])
+    _, keep_prob_pos, _, _ = gate(hidden, mask, noise_scores=noise)
+    assert keep_prob_pos[0].mean() >= keep_prob_pos[1].mean()
+
+    # Force underlying parameter strongly negative
+    with torch.no_grad():
+        gate.raw_cn.fill_(-100.0)
+
+    # Exposed coefficient must remain non-negative (softplus(-100) >= 0)
+    assert gate.adaptive_coefficient.item() >= 0.0
+    assert gate.cn.item() >= 0.0
+
+    # With non-negative cn at ~0, higher noise cannot invert the relationship
+    _, keep_prob_zero, _, _ = gate(hidden, mask, noise_scores=noise)
+    assert torch.allclose(keep_prob_zero[0], keep_prob_zero[1], atol=1e-5)
+

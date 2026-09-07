@@ -1,21 +1,6 @@
-# =============================================================================
-# MrT5 Fixed-Rate Compression Baseline
-#
-# The second model variant. It inserts a learned delete gate after encoder
-# layer 3 that compresses the byte sequence at a FIXED target rate (50%)
-# regardless of input noise. This demonstrates the efficiency gains of
-# byte-level compression but also its limitation: clean and noisy inputs
-# receive the same compression, which can hurt accuracy on noisy text.
-#
-# Architecture:
-#   Encoder layers 0-2 → Delete Gate → Encoder layers 3-N → Decoder
-#
-# The gate uses soft deletion during training (gate outputs as attention
-# masks) and hard deletion during inference (physical byte removal).
-#
-# Reference: Kallini et al. (2025), "MrT5: Dynamic Token Merging for
-#            Efficient Byte-Level Language Models" (ICLR 2025).
-# =============================================================================
+# ByT5 with fixed-rate byte deletion gate (MrT5).
+# Compresses byte sequences at a fixed target rate (default 50%).
+# Uses soft masking during training and hard sequence pruning during inference.
 
 import torch
 import torch.nn as nn
@@ -24,15 +9,15 @@ from transformers.modeling_outputs import BaseModelOutput
 from typing import Dict, Optional
 
 from src.models.delete_gate import DeleteGate
+from src.models.encoder_layers import (
+    run_encoder_layers,
+    compress_position_bias,
+)
 
 
 class FixedCompressionByT5(nn.Module):
     """
-    ByT5 with fixed-rate byte deletion (MrT5 replication).
-
-    The delete gate sits after encoder layer `delete_gate_layer` and
-    removes a fixed fraction of bytes. The target deletion rate is
-    enforced by a rate loss term during training.
+    ByT5 model with mid-encoder fixed-rate byte deletion.
 
     Args:
         config: An MrT5Config instance.
@@ -62,54 +47,12 @@ class FixedCompressionByT5(nn.Module):
         # Fixed deletion target for the rate loss
         self.fixed_deletion_target = config.fixed_deletion_target
 
-    def _run_encoder_layers(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor,
-        start_layer: int,
-        end_layer: int,
-        gate_bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Run a subset of encoder layers on the hidden states.
-
-        Args:
-            gate_bias: Optional per-byte gate scores in [k, 0], shape
-                (batch, seq_len). Added to the attention logits as a log-space
-                penalty — the way MrT5 implements soft deletion.
-
-                It must be ADDED to the extended mask, not multiplied into the
-                binary mask: HuggingFace builds the additive mask as
-                `(1 - mask) * finfo.min`, so a mask of 0.99997 becomes a bias
-                of -1.1e34, which softmax reads as -inf. Multiplying would
-                make the "soft" mask hard and kill the gradient.
-        """
-        encoder = self.model.encoder
-        # Pass only the two positional arguments. The third parameter is
-        # `device` in transformers 4.x but `dtype` in 5.x, so passing a device
-        # positionally raises TypeError on 5.x. Two args works on both.
-        extended_mask = encoder.get_extended_attention_mask(
-            attention_mask, hidden_states.shape[:2]
-        )
-
-        if gate_bias is not None:
-            extended_mask = extended_mask + gate_bias[:, None, None, :]
-
-        for i in range(start_layer, end_layer):
-            layer = encoder.block[i]
-            layer_output = layer(
-                hidden_states,
-                attention_mask=extended_mask,
-            )
-            hidden_states = layer_output[0]
-
-        return hidden_states
-
     def forward(
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
+        decoder_input_ids: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -123,7 +66,7 @@ class FixedCompressionByT5(nn.Module):
 
         Returns:
             Dict with 'loss', 'logits', 'gate_outputs', 'deletion_rate',
-            and 'kept_mask'.
+            'kept_mask', and 'gate_attention_mask'.
         """
         encoder = self.model.encoder
         num_layers = len(encoder.block)
@@ -132,12 +75,16 @@ class FixedCompressionByT5(nn.Module):
         inputs_embeds = encoder.embed_tokens(input_ids)
         hidden_states = encoder.dropout(inputs_embeds)
 
-        # ── Step 2: Pre-gate encoder layers ─────────────────────────────
-        hidden_states = self._run_encoder_layers(
-            hidden_states, attention_mask,
+        # ── Step 2: Pre-gate encoder layers (threads position_bias) ─────
+        pre_gate_res = run_encoder_layers(
+            encoder,
+            hidden_states,
+            attention_mask,
             start_layer=0,
             end_layer=self.delete_gate_layer,
         )
+        hidden_states = pre_gate_res.hidden_states
+        position_bias = pre_gate_res.position_bias
 
         # ── Step 3: Delete gate ─────────────────────────────────────────
         gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
@@ -149,22 +96,41 @@ class FixedCompressionByT5(nn.Module):
             # SOFT deletion: gate score added to attention logits as a
             # log-space penalty. Differentiable; length unchanged.
             modified_mask = attention_mask
-            hidden_states = self._run_encoder_layers(
-                hidden_states, attention_mask,
+            post_gate_res = run_encoder_layers(
+                encoder,
+                hidden_states,
+                attention_mask,
                 start_layer=self.delete_gate_layer,
                 end_layer=num_layers,
+                position_bias=position_bias,
                 gate_bias=gate_outputs.squeeze(-1),
             )
+            hidden_states = post_gate_res.hidden_states
         else:
             # HARD deletion: bytes physically removed — the actual speedup.
-            hidden_states, modified_mask = self.delete_gate.apply_hard_deletion(
+            del_result = self.delete_gate.apply_hard_deletion(
                 hidden_states, kept_mask
             )
-            hidden_states = self._run_encoder_layers(
-                hidden_states, modified_mask,
+            hidden_states = del_result.hidden_states
+            modified_mask = del_result.attention_mask
+
+            # Compress pre-gate position bias to match the pruned sequence length
+            if position_bias is not None:
+                post_gate_bias = compress_position_bias(
+                    position_bias, del_result.source_positions, modified_mask
+                )
+            else:
+                post_gate_bias = None
+
+            post_gate_res = run_encoder_layers(
+                encoder,
+                hidden_states,
+                modified_mask,
                 start_layer=self.delete_gate_layer,
                 end_layer=num_layers,
+                position_bias=post_gate_bias,
             )
+            hidden_states = post_gate_res.hidden_states
 
         # Final layer norm
         hidden_states = encoder.final_layer_norm(hidden_states)
@@ -176,10 +142,35 @@ class FixedCompressionByT5(nn.Module):
             hidden_states = hidden_states * keep_prob.unsqueeze(-1)
 
         # ── Step 6: Decoder ─────────────────────────────────────────────
-        encoder_outputs = (hidden_states,)
+        result = {
+            "gate_outputs": gate_outputs,
+            "keep_prob": keep_prob,
+            # Emitted so the loss uses THIS variant's configured
+            # target rather than silently falling back to 0.5.
+            "fixed_deletion_target": self.fixed_deletion_target,
+            "kept_mask": kept_mask,
+            "deletion_rate": deletion_rate,
+            "gate_attention_mask": attention_mask,
+            "encoder_last_hidden_state": hidden_states,
+        }
 
         if labels is not None:
-            decoder_input_ids = self.model._shift_right(labels)
+            dec_input_ids = self.model._shift_right(labels)
+            decoder_outputs = self.model.decoder(
+                input_ids=dec_input_ids,
+                encoder_hidden_states=hidden_states,
+                encoder_attention_mask=modified_mask,
+            )
+            sequence_output = decoder_outputs[0]
+            lm_logits = self.model.lm_head(sequence_output)
+            result["logits"] = lm_logits
+
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            result["loss"] = loss_fct(
+                lm_logits.view(-1, lm_logits.size(-1)),
+                labels.view(-1),
+            )
+        elif decoder_input_ids is not None:
             decoder_outputs = self.model.decoder(
                 input_ids=decoder_input_ids,
                 encoder_hidden_states=hidden_states,
@@ -187,45 +178,14 @@ class FixedCompressionByT5(nn.Module):
             )
             sequence_output = decoder_outputs[0]
             lm_logits = self.model.lm_head(sequence_output)
-
-            result = {
-                "logits": lm_logits,
-                "gate_outputs": gate_outputs,
-                "keep_prob": keep_prob,
-                # Emitted so the loss uses THIS variant's configured
-                # target rather than silently falling back to 0.5.
-                "fixed_deletion_target": self.fixed_deletion_target,
-                "kept_mask": kept_mask,
-                "deletion_rate": deletion_rate,
-                "encoder_last_hidden_state": hidden_states,
-            }
-
-            # Cross-entropy loss (computed by the external loss module)
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            result["loss"] = loss_fct(
-                lm_logits.view(-1, lm_logits.size(-1)),
-                labels.view(-1),
-            )
-
-            return result
+            result["logits"] = lm_logits
         else:
-            decoder_outputs = self.model.decoder(
-                encoder_hidden_states=hidden_states,
-                encoder_attention_mask=modified_mask,
+            raise ValueError(
+                "Either 'labels' or 'decoder_input_ids' must be provided to forward(). "
+                "For free text generation, call model.generate() instead."
             )
-            lm_logits = self.model.lm_head(decoder_outputs[0])
 
-            return {
-                "logits": lm_logits,
-                "gate_outputs": gate_outputs,
-                "keep_prob": keep_prob,
-                # Emitted so the loss uses THIS variant's configured
-                # target rather than silently falling back to 0.5.
-                "fixed_deletion_target": self.fixed_deletion_target,
-                "kept_mask": kept_mask,
-                "deletion_rate": deletion_rate,
-                "encoder_last_hidden_state": hidden_states,
-            }
+        return result
 
     def generate(
         self,
@@ -250,34 +210,46 @@ class FixedCompressionByT5(nn.Module):
         # Embedding + pre-gate layers
         inputs_embeds = encoder.embed_tokens(input_ids)
         hidden_states = encoder.dropout(inputs_embeds)
-        hidden_states = self._run_encoder_layers(
-            hidden_states, attention_mask,
+        pre_gate_res = run_encoder_layers(
+            encoder,
+            hidden_states,
+            attention_mask,
             start_layer=0,
             end_layer=self.delete_gate_layer,
         )
+        hidden_states = pre_gate_res.hidden_states
+        position_bias = pre_gate_res.position_bias
 
         # Delete gate (hard mode in eval)
         gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
             hidden_states, attention_mask
         )
-        hidden_states, compressed_mask = self.delete_gate.apply_hard_deletion(
+        del_result = self.delete_gate.apply_hard_deletion(
             hidden_states, kept_mask
         )
+        hidden_states = del_result.hidden_states
+        compressed_mask = del_result.attention_mask
+
+        # Compress pre-gate position bias to match the pruned sequence length
+        if position_bias is not None:
+            post_gate_bias = compress_position_bias(
+                position_bias, del_result.source_positions, compressed_mask
+            )
+        else:
+            post_gate_bias = None
 
         # Post-gate layers + final norm
-        hidden_states = self._run_encoder_layers(
-            hidden_states, compressed_mask,
+        post_gate_res = run_encoder_layers(
+            encoder,
+            hidden_states,
+            compressed_mask,
             start_layer=self.delete_gate_layer,
             end_layer=num_layers,
+            position_bias=post_gate_bias,
         )
-        hidden_states = encoder.final_layer_norm(hidden_states)
+        hidden_states = encoder.final_layer_norm(post_gate_res.hidden_states)
 
-        # Beam-search decode.
-        # encoder_outputs must be a BaseModelOutput, not a bare tuple —
-        # generate() reads .last_hidden_state from it to size the beams. Given
-        # a tuple it cannot find the encoder states, falls through to the
-        # "no input_ids" branch, and raises:
-        #   ValueError: `bos_token_id` has to be defined when no `input_ids`...
+        # Beam-search decode
         return self.model.generate(
             encoder_outputs=BaseModelOutput(last_hidden_state=hidden_states),
             attention_mask=compressed_mask,

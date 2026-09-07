@@ -22,9 +22,8 @@ class BaseConfig:
     """
 
     # ── Model identity ──────────────────────────────────────────────────
-    model_name: str = "google/byt5-small"   # HuggingFace model ID
-    # Use byt5-small for development/debugging; switch to byt5-base for
-    # the actual experiments as stated in the manuscript (Section: Scope).
+    model_name: str = "google/byt5-base"   # HuggingFace model ID (manuscript specification)
+
 
     # ── Byte-level sequence constraints ─────────────────────────────────
     # ByT5 processes raw UTF-8 bytes. The manuscript fixes the maximum

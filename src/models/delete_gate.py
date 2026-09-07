@@ -1,35 +1,6 @@
-# =============================================================================
-# Delete Gate — Byte-Level Compression with Noise-Adaptive Conditioning
-#
-# The delete gate assigns every byte position a keep/delete score and
-# removes low-scoring bytes from the sequence. It operates in two modes:
-#
-#   TRAINING (soft deletion):
-#     Gate outputs are applied as soft attention masks. Low-scoring bytes
-#     are masked out of subsequent attention computations, but the sequence
-#     length is not physically reduced. This keeps the gradient flow
-#     fully differentiable.
-#
-#   INFERENCE (hard deletion):
-#     Bytes with gate scores below the threshold (k/2) are physically
-#     removed from the hidden state sequence, producing a shorter input
-#     for the remaining encoder blocks. This is where the computational
-#     savings occur.
-#
-# NOISE-ADAPTIVE CONDITIONING (TAHIMIK's contribution):
-#   The vanilla MrT5 gate applies a fixed deletion rate. TAHIMIK extends
-#   this by shifting every keep score based on the predicted noise level:
-#
-#       keep_score_shift = cn * (n - navg)
-#
-#   where cn is a learned coefficient, n is the noise score from the
-#   noise estimator, and navg is the running average of noise scores.
-#   A noisier sentence (n > navg) shifts scores UP → fewer deletions.
-#   A cleaner sentence (n < navg) shifts scores DOWN → more deletions.
-#
-# Reference: MrT5 (Kallini et al., 2025), Equations 1-3, adapted with
-#            noise-adaptive conditioning per the TAHIMIK manuscript.
-# =============================================================================
+# Delete Gate: byte-level sequence compression with optional noise-adaptive shift.
+# Uses soft masking during training and hard sequence pruning during inference.
+# Adaptive shift: keep_score_shift = cn * (n - navg)
 
 import torch
 import torch.nn as nn
@@ -48,6 +19,9 @@ def gumbel_noise_like(x: torch.Tensor) -> torch.Tensor:
     eps = 3e-4 if x.dtype == torch.float16 else 1e-10
     uniform = torch.empty_like(x).uniform_(eps, 1 - eps)
     return -(-uniform.log()).log()
+
+
+from src.models.encoder_layers import HardDeletionResult
 
 
 class DeleteGate(nn.Module):
@@ -87,10 +61,11 @@ class DeleteGate(nn.Module):
         self.gate_linear = nn.Linear(hidden_dim, 1)
 
         # ── Noise-adaptive conditioning ─────────────────────────────────
-        # cn is a learned scalar coefficient that controls how strongly
-        # the noise score shifts the keep/delete decision.
+        # cn is parameterized via raw_cn such that adaptive_coefficient = softplus(raw_cn) >= 0.
+        # This prevents inverted adaptivity (where noisy sentences would be compressed more).
         if noise_adaptive:
-            self.cn = nn.Parameter(torch.tensor(1.0))
+            # Initialize raw_cn such that softplus(raw_cn) == 1.0 (ln(e - 1) ≈ 0.5413248546129181)
+            self.raw_cn = nn.Parameter(torch.tensor(0.5413248546129181))
 
             # Running average of noise scores (not a learnable parameter —
             # updated via EMA during training, frozen during inference)
@@ -98,6 +73,34 @@ class DeleteGate(nn.Module):
 
         # Hard deletion threshold: midpoint of the gate range [k, 0]
         self.hard_threshold = k / 2.0
+
+    @property
+    def adaptive_coefficient(self) -> torch.Tensor:
+        """Expose non-negative adaptive coefficient cn via softplus."""
+        return torch.nn.functional.softplus(self.raw_cn)
+
+    @property
+    def cn(self) -> torch.Tensor:
+        """Backward-compatible access to adaptive_coefficient."""
+        return self.adaptive_coefficient
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        legacy_key = prefix + "cn"
+        if legacy_key in state_dict:
+            legacy_cn = state_dict.pop(legacy_key)
+            if legacy_cn < 0:
+                raise ValueError(
+                    f"Legacy checkpoint contains negative cn ({legacy_cn}), "
+                    "which represents inverted adaptivity and cannot be loaded."
+                )
+            raw_val = (torch.clamp_min(legacy_cn, 1e-6).expm1().clamp_min(1e-12)).log()
+            state_dict[prefix + "raw_cn"] = raw_val
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
 
     def forward(
         self,
@@ -152,21 +155,20 @@ class DeleteGate(nn.Module):
 
         # ── Step 2: Apply noise-adaptive shift ──────────────────────────
         if self.noise_adaptive and noise_scores is not None:
-            # Detach noise scores so gate gradients don't flow back
-            # to the noise estimator (manuscript: "n is detached here")
+            # Detach noise scores so gate gradients don't flow back to the noise estimator
             n_detached = noise_scores.detach()
 
-            # Update running average during training
+            # Update running average during training under torch.no_grad()
             if self.training:
                 batch_avg = n_detached.mean()
-                self.noise_avg = (
-                    self.noise_avg_momentum * self.noise_avg
-                    + (1 - self.noise_avg_momentum) * batch_avg
-                )
+                with torch.no_grad():
+                    self.noise_avg.mul_(self.noise_avg_momentum).add_(
+                        batch_avg, alpha=1.0 - self.noise_avg_momentum
+                    )
 
             # Shift = cn * (n - navg)
             # Shape: (batch_size,) → (batch_size, 1, 1) for broadcasting
-            shift = self.cn * (n_detached - self.noise_avg)
+            shift = self.adaptive_coefficient * (n_detached - self.noise_avg)
             shift = shift.unsqueeze(1).unsqueeze(2)
 
             # Positive shift (noisy) → scores closer to 0 → keep more
@@ -210,7 +212,7 @@ class DeleteGate(nn.Module):
         self,
         hidden_states: torch.Tensor,
         kept_mask: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> HardDeletionResult:
         """
         Physically remove deleted bytes from the hidden state sequence.
 
@@ -225,10 +227,8 @@ class DeleteGate(nn.Module):
                 Shape: (batch_size, seq_len)
 
         Returns:
-            compressed_states: Hidden states with deleted bytes removed.
-                Shape: (batch_size, new_seq_len, hidden_dim)
-            new_attention_mask: Updated attention mask for the compressed seq.
-                Shape: (batch_size, new_seq_len)
+            HardDeletionResult with compressed_states, new_attention_mask,
+            and source_positions.
         """
         batch_size, seq_len, hidden_dim = hidden_states.shape
         device = hidden_states.device
@@ -276,4 +276,8 @@ class DeleteGate(nn.Module):
             compressed_states.dtype
         )
 
-        return compressed_states, new_attention_mask
+        return HardDeletionResult(
+            hidden_states=compressed_states,
+            attention_mask=new_attention_mask,
+            source_positions=src_positions,
+        )

@@ -85,13 +85,12 @@ def main():
     device = torch.device(args.device)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # --- Shared tokenizer --------------------------------------------------------
-    tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
-
-    # --- Prepare data (shared across all variants) -------------------------------
+    # --- Shared configuration and tokenizer --------------------------------------
     base_config = ByT5Config()
     base_config.seed = args.seed
+    tokenizer = AutoTokenizer.from_pretrained(base_config.model_name)
     pipeline = DataPipeline(base_config, seed=args.seed)
+
 
     gold_noisy, gold_clean = pipeline.load_gold_standard(args.gold_data)
     gold_noise_levels = [
