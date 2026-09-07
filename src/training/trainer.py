@@ -2,22 +2,47 @@
 # with AdamW, cosine LR scheduling, and fp16 mixed precision.
 
 
+import hashlib
 import os
 import time
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
+from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from typing import Dict, Optional, Any, List
 
+from src.data.dataset import NormalizationCollator, NormalizationDataset, collate_fn
 from src.training.losses import TAHIMIKLoss
-from src.data.dataset import NormalizationDataset, NormalizationCollator, collate_fn
 from src.utils.logging_utils import setup_logger
-
 from src.utils.reproducibility import collect_run_metadata
 
 logger = setup_logger("tahimik.trainer")
+
+
+@dataclass
+class HandoffRecord:
+    source_checkpoint_path: str
+    source_stage: str
+    source_epoch: int
+    source_val_loss: float
+    target_stage: str
+    restoration_timestamp: str
+    restoration_success: bool
+    model_fingerprint: str
+
+
+def compute_model_fingerprint(model: nn.Module) -> str:
+    """Computes a deterministic hex digest from the model's parameters."""
+    hasher = hashlib.sha256()
+    for name, param in sorted(model.state_dict().items()):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(param.detach().cpu().numpy().tobytes())
+    return hasher.hexdigest()[:16]
+
 
 
 def compute_noise_band_diagnostics(
@@ -289,13 +314,64 @@ class TAHIMIKTrainer:
             path = os.path.join(
                 checkpoint_dir, f"best_{stage}.pt"
             )
-            torch.save({
+            payload = {
+                "schema_version": "1.0.0",
                 "epoch": epoch,
                 "stage": stage,
                 "model_state_dict": self.model.state_dict(),
-                "val_loss": val_loss,
-            }, path)
+                "val_loss": float(val_loss),
+                "model_fingerprint": compute_model_fingerprint(self.model),
+                "config": asdict(self.config) if hasattr(self.config, "__dataclass_fields__") else {},
+                "provenance": collect_run_metadata(seed=getattr(self.config, "seed", 42)),
+            }
+            torch.save(payload, path)
             logger.info(f"  Saved checkpoint: {path} (val_loss={val_loss:.4f})")
+
+    def restore_best_stage1_for_handoff(self) -> HandoffRecord:
+        """
+        Restores best_stage1.pt into self.model before Stage 2 fine-tuning.
+        Fails closed if the checkpoint is missing, corrupted, or has a stage mismatch.
+        """
+        checkpoint_dir = os.path.join(
+            self.config.checkpoint_dir,
+            self.config.variant_name,
+        )
+        stage1_path = os.path.join(checkpoint_dir, "best_stage1.pt")
+        if not os.path.exists(stage1_path):
+            raise FileNotFoundError(
+                f"Cannot restore Stage 1 checkpoint: file not found at {stage1_path}. "
+                "Stage 2 requires a valid best_stage1.pt from Stage 1."
+            )
+
+        checkpoint = torch.load(stage1_path, map_location=self.device)
+        if checkpoint.get("stage") != "stage1":
+            raise ValueError(
+                f"Checkpoint at {stage1_path} stage mismatch: expected 'stage1', got '{checkpoint.get('stage')}'"
+            )
+
+        if "model_state_dict" not in checkpoint:
+            raise ValueError(f"Malformed checkpoint at {stage1_path}: missing 'model_state_dict'")
+
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        fp = compute_model_fingerprint(self.model)
+
+        record = HandoffRecord(
+            source_checkpoint_path=stage1_path,
+            source_stage="stage1",
+            source_epoch=checkpoint.get("epoch", -1),
+            source_val_loss=checkpoint.get("val_loss", float("inf")),
+            target_stage="stage2",
+            restoration_timestamp=datetime.now(timezone.utc).isoformat(),
+            restoration_success=True,
+            model_fingerprint=fp,
+        )
+        self.handoff_record = record
+        logger.info(
+            f"Successfully restored Stage 1 best checkpoint (epoch={record.source_epoch}, "
+            f"val_loss={record.source_val_loss:.4f}) for Stage 2 handoff."
+        )
+        return record
+
 
     def train_stage(
         self,
@@ -434,6 +510,11 @@ class TAHIMIKTrainer:
 
         # --- Stage 2: Gold Standard Fine-tuning ------------------------------
         if stage2_train is not None and stage2_val is not None:
+            # If Stage 1 ran, restore best_stage1.pt before initializing Stage 2
+            if stage1_train is not None and stage1_val is not None:
+                handoff = self.restore_best_stage1_for_handoff()
+                full_history["handoff"] = asdict(handoff)
+
             self.best_val_loss = float("inf")
             stage2_history = self.train_stage(
                 stage_name="stage2",
@@ -443,6 +524,7 @@ class TAHIMIKTrainer:
                 batch_size=self.config.stage2_batch_size,
             )
             full_history["stage2"] = stage2_history
+
         else:
             logger.info("Skipping Stage 2 (no gold standard data provided)")
 
