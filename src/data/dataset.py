@@ -1,18 +1,5 @@
-# =============================================================================
-# PyTorch Dataset for TAHIMIK Text Normalization
-#
-# Handles both synthetic pretraining data (Stage 1) and gold standard
-# fine-tuning data (Stage 2). Each sample contains:
-#   - noisy_text: the input social media sentence
-#   - clean_text: the reference normalized output
-#   - noise_level: n* (byte-level edit distance ratio), supervision for
-#                  the noise estimator
-#   - input_ids / attention_mask: ByT5-compatible byte-level tensors
-#   - labels: target byte IDs for the decoder
-#
-# The same Dataset class is used for all three model variants to ensure
-# the control variable (training data) is held constant.
-# =============================================================================
+# PyTorch Dataset for noisy-clean sentence pairs with byte-level encodings and noise labels (n*).
+
 
 import torch
 from torch.utils.data import Dataset
@@ -75,32 +62,32 @@ class NormalizationDataset(Dataset):
         noisy = self.noisy_texts[idx]
         clean = self.clean_texts[idx]
 
-        # Tokenize input (noisy sentence)
+        # Tokenize input (noisy sentence) without fixed padding
         input_encoding = self.tokenizer(
             noisy,
             max_length=self.max_input_length,
-            padding="max_length",
+            padding=False,
             truncation=True,
             return_tensors="pt",
         )
 
-        # Tokenize target (clean sentence)
+        # Tokenize target (clean sentence) without fixed padding
         target_encoding = self.tokenizer(
             clean,
             max_length=self.max_target_length,
-            padding="max_length",
+            padding=False,
             truncation=True,
             return_tensors="pt",
         )
 
         # ByT5 convention: replace padding token IDs in labels with -100
         # so the cross-entropy loss ignores padding positions.
-        labels = target_encoding["input_ids"].squeeze()
+        labels = target_encoding["input_ids"].squeeze(0).clone()
         labels[labels == self.tokenizer.pad_token_id] = -100
 
         return {
-            "input_ids": input_encoding["input_ids"].squeeze(),
-            "attention_mask": input_encoding["attention_mask"].squeeze(),
+            "input_ids": input_encoding["input_ids"].squeeze(0),
+            "attention_mask": input_encoding["attention_mask"].squeeze(0),
             "labels": labels,
             "noise_level": torch.tensor(
                 self.noise_levels[idx], dtype=torch.float32
@@ -108,16 +95,60 @@ class NormalizationDataset(Dataset):
         }
 
 
-def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+class NormalizationCollator:
     """
-    Custom collate function for DataLoader.
+    Dynamic padding collator for variable-length ByT5 byte sequences.
+    Pads input_ids with pad_token_id, attention_mask with 0, and labels with -100.
+    Optionally right-pads to the nearest multiple of pad_to_multiple_of.
+    """
 
-    Stacks individual samples into batched tensors. The noise_level
-    field is gathered into a 1D tensor for batch-level loss computation.
-    """
-    return {
-        "input_ids": torch.stack([b["input_ids"] for b in batch]),
-        "attention_mask": torch.stack([b["attention_mask"] for b in batch]),
-        "labels": torch.stack([b["labels"] for b in batch]),
-        "noise_level": torch.stack([b["noise_level"] for b in batch]),
-    }
+    def __init__(
+        self,
+        pad_token_id: int = 0,
+        pad_to_multiple_of: Optional[int] = None,
+    ):
+        self.pad_token_id = pad_token_id
+        self.pad_to_multiple_of = pad_to_multiple_of
+
+    def __call__(self, batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+        input_ids = [b["input_ids"] for b in batch]
+        attention_mask = [b["attention_mask"] for b in batch]
+        labels = [b["labels"] for b in batch]
+        noise_level = torch.stack([b["noise_level"] for b in batch])
+
+        padded_inputs = torch.nn.utils.rnn.pad_sequence(
+            input_ids, batch_first=True, padding_value=self.pad_token_id
+        )
+        padded_masks = torch.nn.utils.rnn.pad_sequence(
+            attention_mask, batch_first=True, padding_value=0
+        )
+        padded_labels = torch.nn.utils.rnn.pad_sequence(
+            labels, batch_first=True, padding_value=-100
+        )
+
+        if self.pad_to_multiple_of is not None and self.pad_to_multiple_of > 0:
+            seq_len = padded_inputs.shape[1]
+            remainder = seq_len % self.pad_to_multiple_of
+            if remainder > 0:
+                pad_len = self.pad_to_multiple_of - remainder
+                padded_inputs = torch.nn.functional.pad(
+                    padded_inputs, (0, pad_len), value=self.pad_token_id
+                )
+                padded_masks = torch.nn.functional.pad(
+                    padded_masks, (0, pad_len), value=0
+                )
+                padded_labels = torch.nn.functional.pad(
+                    padded_labels, (0, pad_len), value=-100
+                )
+
+        return {
+            "input_ids": padded_inputs,
+            "attention_mask": padded_masks,
+            "labels": padded_labels,
+            "noise_level": noise_level,
+        }
+
+
+# Default collator instance using ByT5 standard pad_token_id=0
+collate_fn = NormalizationCollator(pad_token_id=0)
+

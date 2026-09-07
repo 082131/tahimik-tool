@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.utils.data import DataLoader
 
-from src.data.dataset import NormalizationDataset, collate_fn
+from src.data.dataset import NormalizationDataset, NormalizationCollator, collate_fn
 
 
 class EfficiencyBenchmark:
@@ -89,12 +89,14 @@ class EfficiencyBenchmark:
                 "Chapter 3 per-sentence latency evaluation strictly requires batch_size=1"
             )
 
+        pad_id = getattr(self.tokenizer, "pad_token_id", 0)
         loader = DataLoader(
             test_dataset,
             batch_size=1,
             shuffle=False,
-            collate_fn=collate_fn,
+            collate_fn=NormalizationCollator(pad_token_id=pad_id),
         )
+
         num_sentences = len(test_dataset)
 
         # 1. Warm-up passes: run through the dataset a few times to ensure CUDA

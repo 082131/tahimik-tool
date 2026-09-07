@@ -33,8 +33,9 @@ from src.models.fixed_compression_byt5 import FixedCompressionByT5
 from src.models.noise_adaptive_byt5 import NoiseAdaptiveByT5
 
 from src.data.preprocessing import DataPipeline
-from src.data.dataset import NormalizationDataset, collate_fn
+from src.data.dataset import NormalizationDataset, NormalizationCollator, collate_fn
 from src.data.noise_label import compute_noise_level
+
 from src.evaluation.metrics import NormalizationMetrics
 from src.utils.logging_utils import setup_logger
 
@@ -105,8 +106,9 @@ def main():
         test_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        collate_fn=collate_fn,
+        collate_fn=NormalizationCollator(pad_token_id=tokenizer.pad_token_id),
     )
+
 
     # ── Load model ──────────────────────────────────────────────────────
     model = ModelClass(config)

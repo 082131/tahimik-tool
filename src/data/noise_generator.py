@@ -1,33 +1,12 @@
-# =============================================================================
-# Synthetic Noise Generation Pipeline for Tagalog and Taglish Text
-#
-# Generates noisy-to-clean sentence pairs by applying controlled noise
-# operations to clean Tagalog/Taglish sentences. The noise categories
-# are drawn from the thesis manuscript (9 categories) and guided by
-# TagNorm (Agapito et al., 2021) and Karpukhin et al. (2019).
-#
-# The 9 noise categories:
-#   1. Abbreviations and shortenings (e.g., "salamat" -> "slmt")
-#   2. Orthographic variation (e.g., "dito" -> "d2", phonetic spelling)
-#   3. Character elongation (e.g., "grabe" -> "grabeeee")
-#   4. Punctuation variation (e.g., "!!!" -> "!!!!!!!!")
-#   5. Capitalization variation (e.g., random CAPS)
-#   6. Slang and netspeak (e.g., "idol" -> "lodi")
-#   7. Taglish morphology patterns (e.g., "nag-download")
-#   8. Emoji-based sentiment markers (inserting emojis)
-#   9. Code-switching (mixing Tagalog and English)
-#
-# Design principle: each noise function transforms ONE clean token or
-# sentence region. Multiple functions are composed stochastically to
-# simulate the layered noise density found in real Filipino social media.
-#
-# IMPORTANT: The synthetic dataset is used ONLY for Stage 1 pretraining.
-# Final evaluation uses the human-annotated gold standard dataset.
-# =============================================================================
+# Synthetic noise generation pipeline for Tagalog/Taglish text.
+# Applies 9 noise categories (abbreviations, elongation, orthographic, typos, etc.)
+# to clean text for Stage 1 pretraining.
+
 
 import random
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
+from src.data.noise_policy import ProbabilityManifest, SyntheticPairLineage
 
 # --- Common Filipino abbreviation dictionary ---------------------------------
 # Maps standard Tagalog words to their abbreviated social media forms.
@@ -42,7 +21,7 @@ ABBREVIATION_MAP = {
     "paano": ["pano", "pnu"],
     "talaga": ["tlga", "tlaga"],
     "naman": ["nmn", "nman"],
-    "lang": ["lng", "lang"],
+    "lang": ["lng"],
     "sana": ["sna"],
     "kasi": ["kse", "kc"],
     "yung": ["yng", "ung"],
@@ -65,11 +44,13 @@ ABBREVIATION_MAP = {
     "baka": ["bka"],
     "bakit": ["bkit", "bat"],
     "marami": ["mrami", "mrmi"],
-    "totoo": ["totoo", "2too"],
+    "totoo": ["2too"],
     "ngayon": ["ngaun", "ngyn"],
     "bukas": ["bkas"],
     "kanina": ["knina", "knna"],
 }
+
+ABBREVIATIONS = ABBREVIATION_MAP
 
 # --- Vowel sets for vowel omission noise -------------------------------------
 VOWELS = set("aeiouAEIOU")
@@ -81,13 +62,13 @@ SLANG_MAP = {
     "idol": "lodi",
     "pare": "pre",
     "totoo": "trudat",
-    "oo": "oo",
     "grabe": "grabiii",
     "ang galing": "G",
     "tama": "bet",
     "ayos": "slay",
     "maganda": "ganda",
 }
+
 
 # --- Orthographic / phonetic substitution patterns ---------------------------
 ORTHO_SUBSTITUTIONS = {
@@ -121,34 +102,36 @@ class TagalogNoiseGenerator:
         # Possible output: "mgndng umga sa lhat!"
     """
 
-    def __init__(self, seed: int = 42, probabilities=None):
+    def __init__(
+        self,
+        seed: int = 42,
+        manifest: Optional[ProbabilityManifest] = None,
+        probabilities: Optional[Dict[str, float]] = None,
+    ):
+        self.seed = seed
         self.rng = random.Random(seed)
+        self.manifest = manifest
 
-        # Per-category application probabilities.
-        # Higher values produce noisier synthetic data.
-        probabilities = probabilities or {}
-        self.p_abbreviation = probabilities.get("abbreviation", 0.30)
-        self.p_orthographic = probabilities.get("orthographic", 0.20)
-        self.p_elongation = probabilities.get("elongation", 0.15)
-        self.p_punctuation = probabilities.get("punctuation", 0.15)
-        self.p_capitalization = probabilities.get("capitalization", 0.15)
-        self.p_slang = 0.0
-        self.p_vowel_omission = probabilities.get("vowel_omission", 0.20)
-        self.p_emoji_insert = 0.0
-        self.p_char_swap = probabilities.get("char_swap", 0.10)
+        probs = dict(probabilities or {})
+        if manifest is not None:
+            manifest.require_ready()
+            for cat, cat_prob in manifest.categories.items():
+                probs[cat] = cat_prob.resolved_probability
+
+        self.p_abbreviation = probs.get("abbreviation", 0.30)
+        self.p_orthographic = probs.get("orthographic", 0.20)
+        self.p_elongation = probs.get("elongation", 0.15)
+        self.p_punctuation = probs.get("punctuation", 0.15)
+        self.p_capitalization = probs.get("capitalization", 0.15)
+        self.p_vowel_omission = probs.get("vowel_omission", 0.20)
+        self.p_char_swap = probs.get("char_swap", 0.10)
+        self.p_slang = probs.get("slang", 0.0)
+        self.p_emoji_insert = probs.get("emoji", 0.0)
 
     def apply_noise(self, clean_sentence: str) -> str:
         """
-        Apply a stochastic combination of noise categories to a clean sentence.
-
-        Multiple noise types may be applied to the same sentence, reflecting
-        how real Filipino social media text often contains overlapping noise.
-
-        Args:
-            clean_sentence: A clean Tagalog or Taglish sentence.
-
-        Returns:
-            The noisy version of the sentence.
+        Apply a stochastic combination of correctable noise categories to a clean sentence.
+        Preserved features (slang, emoji) are meaning-preserving and only applied in generate_pair.
         """
         noisy = clean_sentence
 
@@ -176,12 +159,11 @@ class TagalogNoiseGenerator:
         if self.rng.random() < self.p_capitalization:
             noisy = self._apply_capitalization_noise(noisy)
 
-        # Slang and netspeak substitution
-        if self.rng.random() < self.p_slang:
+        # Preserved categories (slang, emoji) are never applied as correctable noise in apply_noise
+        if self.rng.random() < 0.0:
             noisy = self._apply_slang(noisy)
 
-        # Emoji insertion
-        if self.rng.random() < self.p_emoji_insert:
+        if self.rng.random() < 0.0:
             noisy = self._apply_emoji_insert(noisy)
 
         # Character-level swap (typos, per Karpukhin et al., 2019)
@@ -189,6 +171,116 @@ class TagalogNoiseGenerator:
             noisy = self._apply_char_swap(noisy)
 
         return noisy
+
+
+    def generate_pair(
+        self,
+        clean_base: str,
+        pair_id: str = "",
+        base_id: str = "",
+    ) -> Tuple[str, str, SyntheticPairLineage]:
+        """
+        Generates an auditable (source, target, lineage) pair from clean text.
+        Preserved augmentations are applied identically to target and source.
+        Correctable corruptions are applied only to source.
+        Guarantees that source != target.
+        """
+        applied_preserved = []
+        applied_correctable = []
+
+        target = clean_base
+
+        # 1. Preserved augmentations: modifies target (and source will inherit it)
+        if self.rng.random() < self.p_slang:
+            new_target = self._apply_slang(target)
+            if new_target != target:
+                target = new_target
+                applied_preserved.append("slang")
+
+        if self.rng.random() < self.p_emoji_insert:
+            new_target = self._apply_emoji_insert(target)
+            if new_target != target:
+                target = new_target
+                applied_preserved.append("emoji")
+
+        # 2. Copy augmented target to source
+        source = target
+
+        # 3. Correctable corruptions: applied to source only
+        if self.rng.random() < self.p_abbreviation:
+            new_source = self._apply_abbreviation(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("abbreviation")
+
+        if self.rng.random() < self.p_vowel_omission:
+            new_source = self._apply_vowel_omission(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("vowel_omission")
+
+        if self.rng.random() < self.p_orthographic:
+            new_source = self._apply_orthographic_variation(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("orthographic")
+
+        if self.rng.random() < self.p_elongation:
+            new_source = self._apply_elongation(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("elongation")
+
+        if self.rng.random() < self.p_punctuation:
+            new_source = self._apply_punctuation_noise(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("punctuation")
+
+        if self.rng.random() < self.p_capitalization:
+            new_source = self._apply_capitalization_noise(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("capitalization")
+
+        if self.rng.random() < self.p_char_swap:
+            new_source = self._apply_char_swap(source)
+            if new_source != source:
+                source = new_source
+                applied_correctable.append("char_swap")
+
+        # 4. Guarantee source != target (never generate identical copies)
+        if source == target:
+            corrupted = self._apply_abbreviation(source)
+            if corrupted != source:
+                source = corrupted
+                applied_correctable.append("abbreviation")
+            else:
+                corrupted = self._apply_elongation(source)
+                if corrupted != source:
+                    source = corrupted
+                    applied_correctable.append("elongation")
+                else:
+                    source = self._apply_char_swap(source)
+                    applied_correctable.append("char_swap")
+
+        manifest_id = self.manifest.manifest_id if self.manifest else "default"
+        resource_versions = (
+            self.manifest.resource_versions if self.manifest else {"lexicon": "1.0.0"}
+        )
+
+        lineage = SyntheticPairLineage(
+            pair_id=pair_id or f"syn_{self.rng.randint(100000, 999999)}",
+            base_sentence_id=base_id,
+            manifest_id=manifest_id,
+            resource_versions=resource_versions,
+            applied_preserved_categories=applied_preserved,
+            applied_correctable_categories=applied_correctable,
+            seed_derivation=self.seed,
+        )
+
+        return source, target, lineage
+
 
     # --- Individual noise functions ------------------------------------------
 

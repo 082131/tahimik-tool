@@ -12,8 +12,9 @@ from transformers import get_scheduler
 from typing import Dict, Optional, Any, List
 
 from src.training.losses import TAHIMIKLoss
-from src.data.dataset import NormalizationDataset, collate_fn
+from src.data.dataset import NormalizationDataset, NormalizationCollator, collate_fn
 from src.utils.logging_utils import setup_logger
+
 from src.utils.reproducibility import collect_run_metadata
 
 logger = setup_logger("tahimik.trainer")
@@ -100,6 +101,10 @@ class TAHIMIKTrainer:
 
         # Best validation loss for checkpoint selection
         self.best_val_loss = float("inf")
+
+        pad_id = getattr(getattr(self.model, "tokenizer", None), "pad_token_id", 0)
+        self.collator = NormalizationCollator(pad_token_id=pad_id)
+
 
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """Create AdamW optimizer per manuscript specification."""
@@ -323,7 +328,7 @@ class TAHIMIKTrainer:
             train_dataset,
             batch_size=batch_size,
             shuffle=True,
-            collate_fn=collate_fn,
+            collate_fn=self.collator,
             num_workers=0,
             pin_memory=self.device.type == "cuda",
         )
@@ -331,10 +336,11 @@ class TAHIMIKTrainer:
             val_dataset,
             batch_size=self.config.eval_batch_size,
             shuffle=False,
-            collate_fn=collate_fn,
+            collate_fn=self.collator,
             num_workers=0,
             pin_memory=self.device.type == "cuda",
         )
+
 
         optimizer = self._create_optimizer()
         num_training_steps = len(train_loader) * epochs
