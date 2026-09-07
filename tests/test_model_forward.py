@@ -288,3 +288,50 @@ def test_short_training_run_moves_deletion_rate_toward_target(patched, inputs):
         f"deletion rate did not move toward the target "
         f"(start={start:.3f}, end={end:.3f}, target={target})"
     )
+
+
+@pytest.mark.parametrize("variant", ["mrt5", "tahimik"])
+@pytest.mark.parametrize("d_model,num_layers", [(32, 4), (48, 18)])
+def test_compression_modules_follow_backbone_shape(variant, d_model, num_layers, monkeypatch):
+    t5_factory = lambda *a, **k: T5ForConditionalGeneration(
+        T5Config(
+            vocab_size=VOCAB,
+            d_model=d_model,
+            d_ff=d_model * 2,
+            d_kv=8,
+            num_layers=num_layers,
+            num_decoder_layers=2,
+            num_heads=4,
+            decoder_start_token_id=0,
+            pad_token_id=0,
+            eos_token_id=1,
+        )
+    )
+    for mod in (mrt5_module, tahimik_module):
+        monkeypatch.setattr(
+            mod, "T5ForConditionalGeneration",
+            type("_Stub", (), {"from_pretrained": staticmethod(t5_factory)}),
+        )
+        monkeypatch.setattr(mod, "AutoTokenizer", _StubTokenizer)
+
+    if variant == "mrt5":
+        model = mrt5_module.FixedCompressionByT5(MrT5Config())
+    else:
+        model = tahimik_module.NoiseAdaptiveByT5(TAHIMIKConfig())
+        assert model.noise_estimator.network[0].in_features == d_model
+
+    assert model.delete_gate.gate_linear.in_features == d_model
+
+    # Run forward pass to confirm complete integration
+    input_ids = torch.randint(3, VOCAB, (2, 16))
+    attention_mask = torch.ones(2, 16, dtype=torch.long)
+    labels = torch.randint(3, VOCAB, (2, 8))
+    noise_level = torch.tensor([0.2, 0.8])
+    out = model(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        labels=labels,
+        noise_level=noise_level,
+    )
+    assert "loss" in out and torch.isfinite(out["loss"])
+
