@@ -60,22 +60,20 @@ for and what the code actually does. Four classes:
 
 Convergence never edits code. It only records what it found.
 
-## The cross-cutting finding
+## The cross-cutting finding [RESOLVED 2026-09-08]
 
-One issue affects `003`, `004`, and `005` simultaneously, so it is stated once
+One issue affected `003`, `004`, and `005` simultaneously, so it is stated once
 here rather than three times:
 
-**The manuscript specifies `byt5-base`. The code runs `byt5-small`.**
+**The manuscript specifies `byt5-base`. The code previously defaulted to `byt5-small` during initial prototyping.**
 
 Manuscript, Scope and Limitation: *"The base variant of ByT5 will be used, and
 both MrT5 and the proposed noise-adaptive model will adopt the base variant."*
 
-`configs/base.py:25` sets `model_name = "google/byt5-small"`, with a comment
-acknowledging the gap and stating base is intended for the real experiments.
-The three model variants all read `config.model_name`, so all three inherit
-`small`.
-
-This is not a bug — it is a deliberate development default. It becomes a
-reporting hazard only if a number produced under `small` is presented as a
-manuscript result. Constitution Principle III requires the divergence be
-flagged at the line where it lives; that flag is a task, not yet done.
+**Resolution (2026-09-08, AD-002)**:
+`configs/base.py` authoritatively sets `model_name = "google/byt5-base"`, inherited
+by all three model variants and the shared tokenizer in `scripts/run_experiment.py`.
+To preserve manuscript-equivalent effective batch sizes on constrained GPU hardware,
+gradient accumulation steps (8 for Stage 1, 4 for Stage 2) are paired with physical microbatches (2).
+Furthermore, `src/training/trainer.py` enforces checkpoint architecture validation
+so legacy `byt5-small` checkpoints cannot be inadvertently loaded into Base models.

@@ -100,9 +100,10 @@ It is also exactly the kind of thing an examiner might find first.
 `p < 0.05` and a CI excluding zero. The code checks only the p-value, having
 computed the CI two lines earlier.
 
-**The code runs a smaller model than the manuscript specifies.** `byt5-small`
-versus `byt5-base`. Deliberate as a development default, a problem only if a
-number from it is reported as a result.
+**The code ran a smaller model than the manuscript specified.** `byt5-small`
+versus `byt5-base`. Deliberate as an early development default (resolved in AD-002;
+the codebase now authoritatively runs `google/byt5-base` across all variants),
+a problem only if a number from small was reported as a result.
 
 **Runs are seeded but not bit-reproducible.** Seeding is correct everywhere.
 PyTorch's deterministic mode is not enabled, so GPU runs can still vary

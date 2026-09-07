@@ -62,22 +62,23 @@ size. The test itself is correct; the reporting is incomplete.
 ---
 
 ## Fix before running real experiments
-
-### 4. The code runs `byt5-small`; the manuscript specifies `byt5-base`
+ 
+### 4. The code runs `byt5-small`; the manuscript specifies `byt5-base` [RESOLVED 2026-09-08]
 
 **Where**: `configs/base.py:25`, inherited by all three variants
 **Specs**: [003](003-byt5-baseline/spec.md), [004](004-fixed-rate-compression/spec.md), [005](005-noise-adaptive-byt5/spec.md) F1
+**Status**: **RESOLVED** on 2026-09-08 via AD-002 and the ByT5-Base Migration Plan.
 
 Manuscript: *"The base variant of ByT5 will be used, and both MrT5 and the
 proposed noise-adaptive model will adopt the base variant."*
 
-This is a deliberate development default, not a bug. It becomes a problem only
-if a number produced under `small` is reported as a manuscript result.
-Constitution Principle III requires the divergence be flagged at that line.
-
-**Related**: `scripts/run_experiment.py:87` hardcodes the `byt5-small`
-tokenizer instead of reading `config.model_name`, so switching the config would
-silently pair a base model with a small tokenizer.
+Resolution:
+1. `BaseConfig.model_name` is set to `"google/byt5-base"` as the single authority across all variants and tokenizer loaders.
+2. `scripts/run_experiment.py` uses `base_config.model_name` rather than any hardcoded string.
+3. All compression modules (delete gate, noise estimator) dynamically derive shapes from `config.d_model` (1,536 for Base).
+4. Physical batch sizes (2) are paired with gradient accumulation steps (8 for Stage 1, 4 for Stage 2) to preserve effective batches of 16 and 8.
+5. Checkpoint architecture validation explicitly rejects Small (`d_model=1472`) checkpoints from being loaded into Base models.
+6. Checkpoint provenance and hardware preflight script (`scripts/preflight_base.py`) verify model identity before training.
 
 ### 5. Runs are seeded but not bit-reproducible
 

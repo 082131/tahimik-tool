@@ -20,11 +20,14 @@ Filipino social media text is full of abbreviations (*slmt* for *salamat*), char
 
 | Variant | Compression | Purpose |
 |---------|------------|---------|
-| **ByT5 Baseline** | None (every byte processed) | Accuracy ceiling |
-| **MrT5 Fixed** | Fixed 50% deletion rate | Efficiency baseline |
-| **TAHIMIK (Proposed)** | Noise-adaptive deletion | Best of both worlds |
+| **ByT5-base** | None (every byte processed) | Accuracy ceiling |
+| **ByT5-base + fixed-rate deletion** | Fixed 50% deletion rate (MrT5-style delete gate) | Efficiency baseline |
+| **TAHIMIK (ByT5-base + noise-adaptive deletion)** | Noise-adaptive deletion | Best of both worlds |
 
-Same data, same optimizer, same schedule — only the compression mechanism changes.
+Same backbone (`google/byt5-base`), same data, same optimizer, same schedule — only the compression mechanism changes.
+All three variants are initialized independently from Google's pretrained `google/byt5-base` checkpoint; task-specific gate and estimator modules are randomly initialized.
+Neither `stanfordnlp/mrt5-small` nor an unofficial "MrT5-base" checkpoint is used; "MrT5-style" refers solely to the deletion mechanism.
+Layer 3 is retained as the absolute delete-gate location across both compressed variants for manuscript fidelity.
 
 ---
 

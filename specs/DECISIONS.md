@@ -8,8 +8,8 @@ what it costs.
 
 ## AD-001: Adopt Stanford's MrT5 implementation; do not use their checkpoint
 
-**Date**: 2026-08-27
-**Status**: Decided, **not yet implemented**
+**Date**: 2026-08-27 (Historical Note: Initial decision specified `byt5-small`; superseded on 2026-09-08 by AD-002 specifying `google/byt5-base`)
+**Status**: Decided, **implemented**
 **Affects**: [004](004-fixed-rate-compression/spec.md), [005](005-noise-adaptive-byt5/spec.md)
 
 ### Decision
@@ -17,12 +17,12 @@ what it costs.
 Replace the hand-written delete gate in `src/models/delete_gate.py` with
 Stanford's implementation from
 [github.com/jkallini/mrt5](https://github.com/jkallini/mrt5)
-(`models/modeling_mrt5.py`), and **train it from `byt5-small` on this study's
-data**.
+(`models/modeling_mrt5.py`), and **train it from `google/byt5-base` on this study's
+data** (originally drafted as `byt5-small` on 2026-08-27 before the base migration).
 
 Explicitly **do not** use the released
 [`stanfordnlp/mrt5-small`](https://huggingface.co/stanfordnlp/mrt5-small)
-checkpoint.
+checkpoint or transplant any 1,472-dim weights into ByT5-base's 1,536-dim hidden states.
 
 TAHIMIK's noise-adaptive conditioning is then built as an extension of that
 same implementation, so both compressed variants share one gate and differ only
@@ -56,8 +56,8 @@ conditioning, and the contribution would again be unmeasurable.
 
 | Option | Fair comparison | Faithful to MrT5 | Verdict |
 |--------|-----------------|------------------|---------|
-| **A.** Keep the reimplementation | Yes | Unproven | Current state. Works, but fidelity is undefended |
-| **B.** Stanford's code, trained from `byt5-small` | Yes | Yes | **Chosen** |
+| **A.** Keep the reimplementation | Yes | Unproven | Rejected |
+| **B.** Stanford's code, trained from `google/byt5-base` | Yes | Yes | **Chosen** (Originally `byt5-small` on 2026-08-27; upgraded to `google/byt5-base` in AD-002) |
 | **C.** Stanford's checkpoint, fine-tuned on study data | **No** | Yes | Rejected — buys fidelity at the cost of the study design |
 
 C was rejected specifically because its failure mode is asymmetric and
@@ -66,48 +66,23 @@ or ties, the outcome cannot be attributed and the thesis has no clean answer.
 Betting the comparison on getting the preferred result is a poor position to
 defend from.
 
-### What this costs
-
-- **Licensing**: Apache 2.0, so vendoring the model file is permitted **with
-  attribution**. The repository currently has no top-level `LICENSE`,
-  `NOTICE`, or `ATTRIBUTIONS.md`; one is now required.
-- **Integration**: the repo is a research release, cloned rather than pip
-  installed, and its `utils.py` expects a `BASE_PATH` macro to be edited.
-  Vendoring the single model file is likely cleaner than depending on the repo
-  wholesale.
-- **Rework**: `delete_gate.py` and both compressed variants change.
-  `tests/test_delete_gate.py` and `tests/test_model_forward.py` assume the
-  current gate's 4-tuple return signature and will need revision.
-- **Risk**: this replaces working, tested code. It should not be attempted
-  immediately before a deadline.
-
-### Consequences for existing findings
-
-- **Finding 8** (`L_attn_reg` deviates from MrT5 Appendix D) is likely resolved
-  by adopting their loss alongside their gate — to be confirmed, not assumed.
-- **Finding 9** (`navg` initialisation, gate-shift clamp) stays open. Both are
-  TAHIMIK's own additions and appear in no MrT5 implementation.
-- **Finding 7** (`cn` sign unconstrained) stays open, for the same reason.
-- The Python-loop hard deletion becomes moot, since Stanford's vectorised
-  version replaces it.
-
-### Not yet done
-
-This is a decision, not an implementation. Nothing in `src/` has changed.
-Tasks live in [004](004-fixed-rate-compression/tasks.md) and
-[005](005-noise-adaptive-byt5/tasks.md).
-
 ---
 
-## AD-002: Authoritative ByT5-Base Backbone, Dynamic Collation, and Position Bias Preservation
+## AD-002: Authoritative ByT5-Base Backbone, Dynamic Collation, Position Bias Preservation, and Gradient Accumulation
 
 **Date**: 2026-09-08
 **Status**: Decided and **Implemented**
-**Affects**: `configs/base.py`, `src/models/`, `src/data/`, `src/training/`
+**Affects**: `configs/base.py`, `src/models/`, `src/data/`, `src/training/`, `scripts/`
 
 ### Decision
-1. Configure `google/byt5-base` as the base model backbone across all three experimental conditions (ByT5 baseline, MrT5 fixed compression, TAHIMIK noise-adaptive).
-2. Maintain position bias preservation across the compression interface by capturing the relative position bias tensor at layer index 1 and vector-gathering it across retained token indices via `compress_position_bias`.
-3. Eliminate static 1,024-byte padding at dataset initialization; use a 1,024-byte truncation ceiling and dynamically collate batches to batch-maximum length using `NormalizationCollator`.
-4. Restore `best_stage1.pt` (evaluated on validation loss) before constructing the optimizer and scheduler for Stage 2 fine-tuning.
+1. **Unambiguous Model Variants**: Establish the manuscript-required three experimental conditions:
+   - `ByT5-base` (uncompressed accuracy ceiling)
+   - `ByT5-base + fixed-rate deletion` (MrT5-style fixed delete gate)
+   - `TAHIMIK (ByT5-base + noise-adaptive deletion)` (noise-adaptive delete gate)
+2. **Authoritative Backbone**: Configure `BaseConfig.model_name = "google/byt5-base"` as the sole authority across all models and tokenizers. All backbones are initialized independently from Google's pretrained checkpoint; gate and estimator modules are initialized randomly. No released Stanford MrT5 checkpoint is loaded.
+3. **Delete Gate Layer**: Layer 3 is retained as the absolute delete gate location for both compressed variants for manuscript fidelity.
+4. **Position Bias Preservation**: Maintain relative position bias across the compression interface by capturing the relative position bias tensor at layer index 1 and vector-gathering it across retained token indices via `compress_position_bias`.
+5. **Dynamic Padding**: Eliminate static 1,024-byte padding at dataset initialization; use a 1,024-byte truncation ceiling and dynamically collate batches to batch-maximum length using `NormalizationCollator`.
+6. **Effective Batch Preservation via Gradient Accumulation**: Maintain effective batch sizes of 16 (Stage 1) and 8 (Stage 2) using physical microbatches of 2 and gradient accumulation steps of 8 and 4 respectively.
+7. **Two-Stage Checkpoint Handoff and Architecture Validation**: Stage 2 training deterministically restores the best Stage 1 checkpoint (`best_stage1.pt`) evaluated on validation loss before building the Stage 2 optimizer. Checkpoint architecture validation explicitly rejects Small or mismatched model checkpoints.
 

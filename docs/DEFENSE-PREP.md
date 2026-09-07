@@ -277,7 +277,7 @@ If they hand you a debugger or a notebook:
 being annotated). Do not get ambushed. Options, best first:
 
 **Option A — Train a tiny demo checkpoint beforehand (recommended if time allows).**
-Run Stage-1-only on a small synthetic set with `byt5-small` to produce a real
+Run Stage-1-only on a small synthetic set with ByT5-base (or tiny backbone fixture for local validation) to produce a real
 `best_stage1.pt`. It won't be accurate, but the tool will *respond*, and you can
 say "quality needs the gold data; this proves the end-to-end path is live." The
 backend already accepts `best_stage1.pt` as a fallback.
@@ -332,9 +332,10 @@ it's in our specs."* (This is literally your project's stated status.)
 - **"Are your numbers reproducible?"** → "Seed 42, config-driven, no inline
   hyperparameters. Full CUDA determinism isn't enabled yet — a known gap
   (`FINDINGS.md` #5) — so today it's reproducible up to GPU non-determinism."
-- **"Why byt5-small in the config if the paper says base?"** → "small is a dev
-  default for fast iteration; base is for the real runs. We flagged the divergence
-  so no small-run number is ever reported as a base result (`FINDINGS.md` #4)."
+- **"Why byt5-small in the config if the paper says base?"** → "Small was an early dev
+  default; the codebase migrated authoritatively to `google/byt5-base` across all
+  configs, tokenizers, and checkpoint validators (resolved in AD-002). Checkpoint architecture
+  validation explicitly rejects legacy small checkpoints (`FINDINGS.md` #4)."
 
 ### The gaps (they *will* find at least one — get there first)
 - **"Your significance test looks one-tailed."** → "Correct, and it also ignores
@@ -351,7 +352,7 @@ get caught. Each is in [`specs/FINDINGS.md`](../specs/FINDINGS.md):
 | # | Gap | One-line framing |
 |---|---|---|
 | 1–2 | Bootstrap is one-tailed & ignores the CI | "Found in spec review; fix scoped before we report significance." |
-| 4 | Config runs `byt5-small`, paper says `base` | "Dev default; flagged so no small number is reported as base." |
+| 4 | Config runs `byt5-base`, legacy small rejected | "Resolved: ByT5-base is the shared backbone; small checkpoints fail closed." |
 | 5 | Seeded but not bit-reproducible | "Determinism mode not yet enabled; documented trade-off." |
 | 6 | Checkpoints don't record the commit | "Provenance stamping is scoped." |
 | 7 | `cn` sign unconstrained (could invert adaptivity) | "The one silent failure; fix is `cn ≥ 0`." |
