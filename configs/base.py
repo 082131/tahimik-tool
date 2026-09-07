@@ -51,15 +51,25 @@ class BaseConfig:
 
     # ── Training schedule ───────────────────────────────────────────────
     # Stage 1: synthetic data pretraining
+    # Physical batch size = 2, accumulation = 8 -> effective batch size = 16
     stage1_epochs: int = 3
-    stage1_batch_size: int = 16
+    stage1_batch_size: int = 2
+    stage1_gradient_accumulation_steps: int = 8
 
     # Stage 2: gold standard fine-tuning
+    # Physical batch size = 2, accumulation = 4 -> effective batch size = 8
     stage2_epochs: int = 10
-    stage2_batch_size: int = 8
+    stage2_batch_size: int = 2
+    stage2_gradient_accumulation_steps: int = 4
 
     warmup_ratio: float = 0.06
     lr_scheduler_type: str = "cosine"
+
+    def __post_init__(self):
+        if self.stage1_batch_size <= 0 or self.stage1_gradient_accumulation_steps <= 0:
+            raise ValueError("Stage 1 batch size and accumulation steps must be positive integers.")
+        if self.stage2_batch_size <= 0 or self.stage2_gradient_accumulation_steps <= 0:
+            raise ValueError("Stage 2 batch size and accumulation steps must be positive integers.")
 
     # ── Evaluation ──────────────────────────────────────────────────────
     eval_batch_size: int = 16

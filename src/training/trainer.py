@@ -3,6 +3,7 @@
 
 
 import hashlib
+import math
 import os
 import time
 from dataclasses import asdict, dataclass
@@ -156,8 +157,9 @@ class TAHIMIKTrainer:
         dataloader: DataLoader,
         optimizer: torch.optim.Optimizer,
         scheduler,
+        gradient_accumulation_steps: int = 1,
     ) -> Dict[str, Any]:
-        """Run one training epoch."""
+        """Run one training epoch with gradient accumulation."""
         self.model.train()
         total_losses = {}
         num_batches = 0
@@ -167,10 +169,12 @@ class TAHIMIKTrainer:
         last_coeff = None
         last_navg = None
 
-        for batch in dataloader:
-            batch = {k: v.to(self.device) for k, v in batch.items()}
+        optimizer.zero_grad()
+        num_items = len(dataloader)
+        accum_steps = max(gradient_accumulation_steps, 1)
 
-            optimizer.zero_grad()
+        for step, batch in enumerate(dataloader, start=1):
+            batch = {k: v.to(self.device) for k, v in batch.items()}
 
             with autocast(enabled=self.fp16):
                 model_outputs = self.model(
@@ -185,18 +189,20 @@ class TAHIMIKTrainer:
                     noise_level=batch.get("noise_level"),
                 )
 
-            # Backward pass with gradient scaling
-            self.scaler.scale(losses["total_loss"]).backward()
+            # Divide loss by gradient accumulation steps before backward
+            scaled_loss = losses["total_loss"] / accum_steps
+            self.scaler.scale(scaled_loss).backward()
 
-            # Gradient clipping
-            self.scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.max_grad_norm
-            )
-
-            self.scaler.step(optimizer)
-            self.scaler.update()
-            scheduler.step()
+            # Step optimizer and scheduler at accumulation boundary or final batch
+            if (step % accum_steps == 0) or (step == num_items):
+                self.scaler.unscale_(optimizer)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.config.max_grad_norm
+                )
+                self.scaler.step(optimizer)
+                self.scaler.update()
+                scheduler.step()
+                optimizer.zero_grad()
 
             # Collect diagnostics
             if "adaptive_coefficient" in model_outputs and model_outputs["adaptive_coefficient"] is not None:
@@ -380,6 +386,7 @@ class TAHIMIKTrainer:
         val_dataset: NormalizationDataset,
         epochs: int,
         batch_size: int,
+        gradient_accumulation_steps: int = 1,
     ) -> Dict[str, list]:
         """
         Train a single stage (Stage 1 or Stage 2).
@@ -389,13 +396,19 @@ class TAHIMIKTrainer:
             train_dataset: Training dataset.
             val_dataset: Validation dataset.
             epochs: Number of epochs to train.
-            batch_size: Batch size.
+            batch_size: Physical batch size.
+            gradient_accumulation_steps: Microbatches per optimizer step.
 
         Returns:
             History dict with per-epoch train and val losses.
         """
+        accum_steps = max(gradient_accumulation_steps, 1)
+        effective_batch_size = batch_size * accum_steps
         logger.info(f"{'='*60}")
-        logger.info(f"Starting {stage_name}: {epochs} epochs, batch_size={batch_size}")
+        logger.info(
+            f"Starting {stage_name}: {epochs} epochs, physical batch_size={batch_size}, "
+            f"accum={accum_steps} (effective batch_size={effective_batch_size})"
+        )
         logger.info(f"  Train samples: {len(train_dataset)}")
         logger.info(f"  Val samples:   {len(val_dataset)}")
         logger.info(f"{'='*60}")
@@ -417,9 +430,9 @@ class TAHIMIKTrainer:
             pin_memory=self.device.type == "cuda",
         )
 
-
         optimizer = self._create_optimizer()
-        num_training_steps = len(train_loader) * epochs
+        updates_per_epoch = math.ceil(len(train_loader) / accum_steps)
+        num_training_steps = updates_per_epoch * epochs
         scheduler = self._create_scheduler(optimizer, num_training_steps)
 
         history = {"train": [], "val": []}
@@ -428,7 +441,12 @@ class TAHIMIKTrainer:
             epoch_start = time.time()
 
             # Train
-            train_losses = self._train_epoch(train_loader, optimizer, scheduler)
+            train_losses = self._train_epoch(
+                train_loader,
+                optimizer,
+                scheduler,
+                gradient_accumulation_steps=accum_steps,
+            )
             # Validate
             val_losses = self._validate(val_loader)
 
@@ -465,8 +483,6 @@ class TAHIMIKTrainer:
                     band_info.append(f"{b}: {val_str} (n={d['count']})")
                 logger.info(f"    Train Noise Bands: {', '.join(band_info)}")
 
-
-
             # Checkpoint
             self._save_checkpoint(epoch, stage_name, val_losses["total_loss"])
 
@@ -497,12 +513,14 @@ class TAHIMIKTrainer:
         # --- Stage 1: Synthetic Pretraining ----------------------------------
         if stage1_train is not None and stage1_val is not None:
             self.best_val_loss = float("inf")
+            stage1_accum = getattr(self.config, "stage1_gradient_accumulation_steps", 1)
             stage1_history = self.train_stage(
                 stage_name="stage1",
                 train_dataset=stage1_train,
                 val_dataset=stage1_val,
                 epochs=self.config.stage1_epochs,
                 batch_size=self.config.stage1_batch_size,
+                gradient_accumulation_steps=stage1_accum,
             )
             full_history["stage1"] = stage1_history
         else:
@@ -516,12 +534,14 @@ class TAHIMIKTrainer:
                 full_history["handoff"] = asdict(handoff)
 
             self.best_val_loss = float("inf")
+            stage2_accum = getattr(self.config, "stage2_gradient_accumulation_steps", 1)
             stage2_history = self.train_stage(
                 stage_name="stage2",
                 train_dataset=stage2_train,
                 val_dataset=stage2_val,
                 epochs=self.config.stage2_epochs,
                 batch_size=self.config.stage2_batch_size,
+                gradient_accumulation_steps=stage2_accum,
             )
             full_history["stage2"] = stage2_history
 
