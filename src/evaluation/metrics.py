@@ -144,25 +144,42 @@ class NormalizationMetrics:
         return sum(values) / max(len(values), 1)
 
     @staticmethod
-    def _alpha(pred: str, ref: str) -> float:
-        """Compute word accuracy strictly for alphabetic words (ignoring punctuation/digits)."""
-        # Unicode pattern matching words composed strictly of alphabetic characters
+    def _alphabetic_words(text: str) -> List[str]:
+        """Extract purely alphabetic words, stripped of surrounding punctuation."""
+        words = text.split()
         pattern = re.compile(r"^[^\W\d_]+$", re.UNICODE)
+        result = []
+        for word in words:
+            cleaned = word.strip(".,!?;:\"'()[]{}«»-–—").lower()
+            if cleaned and pattern.match(cleaned):
+                result.append(cleaned)
+        return result
 
-        ref_words = ref.split()
-        pred_words = pred.split()
+    @staticmethod
+    def _word_levenshtein(seq1: List[str], seq2: List[str]) -> int:
+        """Computes word sequence Levenshtein distance (insertions, deletions, substitutions)."""
+        m, n = len(seq1), len(seq2)
+        dp = [list(range(n + 1))] + [[i] + [0] * n for i in range(1, m + 1)]
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if seq1[i - 1] == seq2[j - 1]:
+                    dp[i][j] = dp[i - 1][j - 1]
+                else:
+                    dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+        return dp[m][n]
 
-        # Find word indices in reference that are purely alphabetic
-        indices = [i for i, word in enumerate(ref_words) if pattern.match(word)]
-        if not indices:
-            return 1.0 if not ref_words and not pred_words else 0.0
+    @staticmethod
+    def _alpha(pred: str, ref: str) -> float:
+        """Compute word accuracy strictly for alphabetic words with sequence alignment."""
+        pred_words = NormalizationMetrics._alphabetic_words(pred)
+        ref_words = NormalizationMetrics._alphabetic_words(ref)
 
-        matches = sum(
-            1
-            for i in indices
-            if i < len(pred_words) and pred_words[i].lower() == ref_words[i].lower()
-        )
-        return matches / len(indices)
+        if not ref_words:
+            return 1.0 if not pred_words else 0.0
+
+        dist = NormalizationMetrics._word_levenshtein(pred_words, ref_words)
+        return max(0.0, 1.0 - dist / len(ref_words))
+
 
     def compute_alpha_word_accuracy(
         self,

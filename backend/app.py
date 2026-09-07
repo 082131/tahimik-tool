@@ -244,22 +244,30 @@ class BatchNormalizeResponse(BaseModel):
 
 # ── Inference ───────────────────────────────────────────────────────────
 @torch.no_grad()
-def normalize_text(
-    text: str,
+def normalize_texts(
+    texts: List[str],
     model_name: str,
     max_length: int = 512,
     num_beams: int = 4,
-) -> Tuple[str, float]:
-    """Normalize one sentence. Returns (normalized_text, elapsed_ms)."""
+) -> Tuple[List[str], float]:
+    """Normalize a batch of sentences. Returns (normalized_texts, elapsed_ms)."""
+    if not texts:
+        raise HTTPException(status_code=400, detail="Text list cannot be empty")
+
     tokenizer, model = get_model(model_name)
 
     inputs = tokenizer(
-        text,
+        texts,
         return_tensors="pt",
         max_length=1024,
         truncation=True,
         padding=True,
-    ).to(device)
+    )
+    if device is not None:
+        inputs = {
+            k: v.to(device) if hasattr(v, "to") else v
+            for k, v in inputs.items()
+        }
 
     start = time.perf_counter()
     outputs = model.generate(
@@ -270,12 +278,30 @@ def normalize_text(
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 
-    return tokenizer.decode(outputs[0], skip_special_tokens=True), elapsed_ms
+    decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    return decoded, elapsed_ms
+
+
+@torch.no_grad()
+def normalize_text(
+    text: str,
+    model_name: str,
+    max_length: int = 512,
+    num_beams: int = 4,
+) -> Tuple[str, float]:
+    """Normalize one sentence. Returns (normalized_text, elapsed_ms)."""
+    decoded_list, elapsed_ms = normalize_texts(
+        [text],
+        model_name=model_name,
+        max_length=max_length,
+        num_beams=num_beams,
+    )
+    return decoded_list[0], elapsed_ms
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────
 @app.get("/health")
-async def health():
+def health():
     return {
         "status": "ok",
         "device": str(device) if device else None,
@@ -293,7 +319,7 @@ async def health():
 
 
 @app.post("/normalize", response_model=NormalizeResponse)
-async def normalize(req: NormalizeRequest):
+def normalize(req: NormalizeRequest):
     normalized, time_ms = normalize_text(
         req.text,
         model_name=req.model,
@@ -309,27 +335,26 @@ async def normalize(req: NormalizeRequest):
 
 
 @app.post("/normalize/batch", response_model=BatchNormalizeResponse)
-async def normalize_batch(req: BatchNormalizeRequest):
-    results = []
-    total_start = time.perf_counter()
+def normalize_batch(req: BatchNormalizeRequest):
+    if not req.texts:
+        raise HTTPException(status_code=400, detail="Text list cannot be empty")
 
-    for text in req.texts:
-        normalized, time_ms = normalize_text(
-            text,
-            model_name=req.model,
-            max_length=req.max_length,
-            num_beams=req.num_beams,
+    normalized_list, total_ms = normalize_texts(
+        req.texts,
+        model_name=req.model,
+        max_length=req.max_length,
+        num_beams=req.num_beams,
+    )
+    per_sample_ms = round(total_ms / len(req.texts), 2) if req.texts else 0.0
+    results = [
+        NormalizeResponse(
+            input=text,
+            normalized=norm,
+            model=req.model,
+            inference_time_ms=per_sample_ms,
         )
-        results.append(
-            NormalizeResponse(
-                input=text,
-                normalized=normalized,
-                model=req.model,
-                inference_time_ms=round(time_ms, 2),
-            )
-        )
-
-    total_ms = (time.perf_counter() - total_start) * 1000
+        for text, norm in zip(req.texts, normalized_list)
+    ]
     return BatchNormalizeResponse(results=results, total_time_ms=round(total_ms, 2))
 
 

@@ -14,10 +14,7 @@ Filipino social media text is full of abbreviations (*slmt* for *salamat*), char
 
 **Core insight:** not all sentences are equally noisy. A clean sentence can be aggressively compressed (deleting redundant bytes) for efficiency, while a noisy sentence should be preserved in full so the decoder has enough information to correct errors. TAHIMIK learns to estimate noise and adjust compression accordingly.
 
-**Model size**: `configs/base.py` currently pins `google/byt5-small` as a
-development default. The manuscript specifies the **base** variant for the
-actual experiments. See [`specs/FINDINGS.md`](specs/FINDINGS.md) item 4 — no
-reported result may come from a `small` run without stating the divergence.
+**Model size**: `configs/base.py` authoritatively pins `google/byt5-base` as the base model backbone across all three variants (ByT5 baseline, MrT5 fixed compression, and TAHIMIK noise-adaptive), exactly matching the manuscript specification. See [`specs/FINDINGS.md`](specs/FINDINGS.md) item 4 and [`specs/DECISIONS.md`](specs/DECISIONS.md) AD-002.
 
 ### Three Models Compared Under Identical Conditions
 

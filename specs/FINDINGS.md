@@ -212,19 +212,17 @@ majority are already satisfied. The findings above are the exceptions.
 
 ---
 
-## Where each finding lives
+## Resolved Remediations (2026-09-08 Implementation)
 
-Every spec now carries the full artifact set — `spec.md`, `research.md`,
-`plan.md`, `data-model.md`, `quickstart.md`, `tasks.md`. If you want to check a
-finding rather than take it on trust:
+The manuscript alignment remediation completed and verified the following key fixes:
 
-- **`research.md`** records each design question, its answer, and the source
-  that settled it. Where the manuscript is silent, it says so instead of
-  inferring.
-- **`quickstart.md`** carries runnable checks. Spec 007's includes a hand
-  computation showing the two-tailed and one-tailed p-values diverging by
-  0.6014 against 0.3000 on identical data — the clearest way to see why finding
-  1 matters.
-- **`tasks.md`** holds the fix, numbered and scoped.
+1. **Authoritative ByT5-Base Backbone (Finding 4)**: `configs/base.py` and `scripts/run_experiment.py` configure `google/byt5-base` across all three conditions and load tokenizers dynamically.
+2. **Non-Negative Adaptive Coefficient (Finding 7)**: `src/models/delete_gate.py` parameterizes $c_n$ via `raw_cn` and `F.softplus(raw_cn) >= 0.0`, eliminating gate-inversion risk. Legacy checkpoint loading automatically adapts scalar `cn`.
+3. **EMA Gradient Isolation**: `navg` update is executed under `torch.no_grad()`.
+4. **Preserved Relative Position Bias**: Layer index 1 relative position bias is preserved and gathered via `compress_position_bias` in `src/models/encoder_layers.py`.
+5. **Dynamic Padding & Collation**: `src/data/dataset.py` tokenizes with a 1,024-byte ceiling without static padding; batches are collated dynamically with `NormalizationCollator`.
+6. **Synthetic Noise Lineage & Policy**: Deterministic provenance manifests and pair generators prevent identity pairs.
+7. **Best-Stage-1 Checkpoint Handoff**: `src/training/trainer.py` enforces restoring `best_stage1.pt` on validation loss before constructing Stage 2 optimizers.
+8. **Aligned Alpha-Word Accuracy**: Sequence-aligned Levenshtein word matching prevents positional drift penalties.
+9. **Batched Non-Blocking Inference API**: `backend/app.py` executes single-call `model.generate()` over batches without blocking the async event loop.
 
-112 tasks across six features.

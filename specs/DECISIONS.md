@@ -96,3 +96,18 @@ defend from.
 This is a decision, not an implementation. Nothing in `src/` has changed.
 Tasks live in [004](004-fixed-rate-compression/tasks.md) and
 [005](005-noise-adaptive-byt5/tasks.md).
+
+---
+
+## AD-002: Authoritative ByT5-Base Backbone, Dynamic Collation, and Position Bias Preservation
+
+**Date**: 2026-09-08
+**Status**: Decided and **Implemented**
+**Affects**: `configs/base.py`, `src/models/`, `src/data/`, `src/training/`
+
+### Decision
+1. Configure `google/byt5-base` as the base model backbone across all three experimental conditions (ByT5 baseline, MrT5 fixed compression, TAHIMIK noise-adaptive).
+2. Maintain position bias preservation across the compression interface by capturing the relative position bias tensor at layer index 1 and vector-gathering it across retained token indices via `compress_position_bias`.
+3. Eliminate static 1,024-byte padding at dataset initialization; use a 1,024-byte truncation ceiling and dynamically collate batches to batch-maximum length using `NormalizationCollator`.
+4. Restore `best_stage1.pt` (evaluated on validation loss) before constructing the optimizer and scheduler for Stage 2 fine-tuning.
+
