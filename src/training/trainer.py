@@ -94,6 +94,66 @@ def compute_noise_band_diagnostics(
     }
 
 
+def validate_checkpoint_architecture(
+    checkpoint: Dict[str, Any],
+    model: nn.Module,
+    allow_legacy: bool = False,
+) -> Dict[str, Any]:
+    """
+    Validates that a checkpoint's architecture matches the target model's architecture.
+    Fails closed if legacy checkpoint lacks architecture metadata unless allow_legacy=True.
+    Raises ValueError with all detected mismatches.
+    """
+    arch = checkpoint.get("architecture")
+    if not arch:
+        if not allow_legacy:
+            raise ValueError(
+                "Checkpoint lacks architecture metadata. "
+                "Set allow_legacy=True only for legacy development checkpoints (ineligible for thesis reporting)."
+            )
+        logger.warning(
+            "Loading legacy checkpoint lacking architecture metadata. "
+            "This run is marked ineligible for thesis reporting."
+        )
+        return {"legacy": True, "validated": False}
+
+    # Extract model architecture
+    m = getattr(model, "model", model)
+    cfg = getattr(m, "config", getattr(model, "config", None))
+    expected_d_model = getattr(cfg, "d_model", None)
+    expected_encoder_layers = getattr(cfg, "num_layers", getattr(cfg, "num_encoder_layers", None))
+    expected_decoder_layers = getattr(cfg, "num_decoder_layers", None)
+    expected_vocab = getattr(cfg, "vocab_size", None)
+
+    mismatches = []
+    if expected_d_model is not None and arch.get("d_model") is not None:
+        if arch["d_model"] != expected_d_model:
+            mismatches.append(f"d_model mismatch: checkpoint has {arch['d_model']}, model expects {expected_d_model}")
+
+    if expected_encoder_layers is not None and arch.get("num_encoder_layers") is not None:
+        if arch["num_encoder_layers"] != expected_encoder_layers:
+            mismatches.append(
+                f"num_encoder_layers mismatch: checkpoint has {arch['num_encoder_layers']}, model expects {expected_encoder_layers}"
+            )
+
+    if expected_decoder_layers is not None and arch.get("num_decoder_layers") is not None:
+        if arch["num_decoder_layers"] != expected_decoder_layers:
+            mismatches.append(
+                f"num_decoder_layers mismatch: checkpoint has {arch['num_decoder_layers']}, model expects {expected_decoder_layers}"
+            )
+
+    if expected_vocab is not None and arch.get("vocab_size") is not None:
+        if arch["vocab_size"] != expected_vocab:
+            mismatches.append(f"vocab_size mismatch: checkpoint has {arch['vocab_size']}, model expects {expected_vocab}")
+
+    if mismatches:
+        raise ValueError(
+            "Checkpoint architecture is incompatible with model:\n  - " + "\n  - ".join(mismatches)
+        )
+
+    return {"legacy": False, "validated": True, "architecture": arch}
+
+
 class TAHIMIKTrainer:
     """
     Two-stage trainer for all TAHIMIK model variants.
@@ -112,14 +172,28 @@ class TAHIMIKTrainer:
         self.config = config
         self.loss_fn = loss_fn
 
-        self.device = torch.device(
-            config.device if torch.cuda.is_available() else "cpu"
-        )
+        # Resolve device
+        device_str = getattr(config, "device", "cuda")
+        if device_str == "cuda" and not torch.cuda.is_available():
+            self.device = torch.device("cpu")
+            fallback_to_cpu = True
+        else:
+            self.device = torch.device(device_str)
+            fallback_to_cpu = False
+
         self.model.to(self.device)
 
         # Precision and device validation
-        precision = getattr(config, "precision", "fp16").lower()
-        if self.device.type == "cpu" and precision in ("fp16", "bf16"):
+        precision = getattr(config, "precision", None)
+        if precision is None:
+            precision = "fp32" if self.device.type == "cpu" else "fp16"
+        else:
+            precision = precision.lower()
+
+        if fallback_to_cpu and precision in ("fp16", "bf16"):
+            logger.warning(f"CUDA not available; falling back precision '{precision}' to 'fp32' on CPU.")
+            precision = "fp32"
+        elif self.device.type == "cpu" and precision in ("fp16", "bf16"):
             raise ValueError(
                 f"Precision '{precision}' is not supported on CPU. Use 'fp32' on CPU."
             )
@@ -357,10 +431,22 @@ class TAHIMIKTrainer:
             provenance["precision"] = self.precision
             provenance["gradient_checkpointing"] = getattr(self.config, "gradient_checkpointing", False)
 
+            # Extract architecture metadata
+            m = getattr(self.model, "model", self.model)
+            cfg = getattr(m, "config", getattr(self.model, "config", None))
+            arch = {
+                "model_name": getattr(self.config, "model_name", "google/byt5-base"),
+                "d_model": getattr(cfg, "d_model", None),
+                "num_encoder_layers": getattr(cfg, "num_layers", getattr(cfg, "num_encoder_layers", None)),
+                "num_decoder_layers": getattr(cfg, "num_decoder_layers", None),
+                "vocab_size": getattr(cfg, "vocab_size", None),
+            }
+
             payload = {
                 "schema_version": "1.0.0",
                 "epoch": epoch,
                 "stage": stage,
+                "architecture": arch,
                 "model_state_dict": self.model.state_dict(),
                 "val_loss": float(val_loss),
                 "model_fingerprint": compute_model_fingerprint(self.model),
@@ -370,7 +456,7 @@ class TAHIMIKTrainer:
             torch.save(payload, path)
             logger.info(f"  Saved checkpoint: {path} (val_loss={val_loss:.4f})")
 
-    def restore_best_stage1_for_handoff(self) -> HandoffRecord:
+    def restore_best_stage1_for_handoff(self, allow_legacy: bool = False) -> HandoffRecord:
         """
         Restores best_stage1.pt into self.model before Stage 2 fine-tuning.
         Fails closed if the checkpoint is missing, corrupted, or has a stage mismatch.
@@ -395,6 +481,7 @@ class TAHIMIKTrainer:
         if "model_state_dict" not in checkpoint:
             raise ValueError(f"Malformed checkpoint at {stage1_path}: missing 'model_state_dict'")
 
+        validate_checkpoint_architecture(checkpoint, self.model, allow_legacy=allow_legacy)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         fp = compute_model_fingerprint(self.model)
 
@@ -588,17 +675,18 @@ class TAHIMIKTrainer:
         logger.info("Training complete.")
         return full_history
 
-    def load_checkpoint(self, checkpoint_path: str):
-        """Load a saved checkpoint into the model."""
+    def load_checkpoint(self, checkpoint_path: str, allow_legacy: bool = False):
+        """Load a saved checkpoint into the model after validating architecture."""
         checkpoint = torch.load(
-            checkpoint_path, map_location=self.device, weights_only=True
+            checkpoint_path, map_location=self.device
         )
+        validate_checkpoint_architecture(checkpoint, self.model, allow_legacy=allow_legacy)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         logger.info(
             f"Loaded checkpoint from {checkpoint_path} "
-            f"(epoch={checkpoint['epoch']}, "
-            f"stage={checkpoint['stage']}, "
-            f"val_loss={checkpoint['val_loss']:.4f})"
+            f"(epoch={checkpoint.get('epoch', 'unknown')}, "
+            f"stage={checkpoint.get('stage', 'unknown')}, "
+            f"val_loss={checkpoint.get('val_loss', float('nan')):.4f})"
         )
 
 
