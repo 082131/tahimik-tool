@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
 
@@ -43,7 +43,6 @@ def compute_model_fingerprint(model: nn.Module) -> str:
         hasher.update(name.encode("utf-8"))
         hasher.update(param.detach().cpu().numpy().tobytes())
     return hasher.hexdigest()[:16]
-
 
 
 def compute_noise_band_diagnostics(
@@ -101,15 +100,11 @@ class TAHIMIKTrainer:
 
     Handles the full training loop including:
         - AdamW optimizer with cosine LR scheduling
-        - Mixed-precision (fp16) training
-        - Gradient clipping
-        - Checkpoint saving (best validation loss)
+        - Precision controls (fp32 / fp16 / bf16) with AMP
+        - Model gradient checkpointing
+        - Gradient accumulation
+        - Checkpoint saving and provenance
         - Training/validation logging per epoch
-
-    Args:
-        model: One of ByT5Baseline, FixedCompressionByT5, or NoiseAdaptiveByT5.
-        config: The corresponding config (ByT5Config / MrT5Config / TAHIMIKConfig).
-        loss_fn: A TAHIMIKLoss instance configured for this variant.
     """
 
     def __init__(self, model, config, loss_fn: TAHIMIKLoss):
@@ -122,8 +117,46 @@ class TAHIMIKTrainer:
         )
         self.model.to(self.device)
 
-        self.fp16 = config.fp16 and torch.cuda.is_available()
-        self.scaler = GradScaler(enabled=self.fp16)
+        # Precision and device validation
+        precision = getattr(config, "precision", "fp16").lower()
+        if self.device.type == "cpu" and precision in ("fp16", "bf16"):
+            raise ValueError(
+                f"Precision '{precision}' is not supported on CPU. Use 'fp32' on CPU."
+            )
+        if self.device.type == "cuda" and precision == "bf16" and not torch.cuda.is_bf16_supported():
+            raise ValueError(
+                "bf16 precision requested but not supported on this CUDA device."
+            )
+
+        self.precision = precision
+        if precision == "bf16":
+            self.autocast_dtype = torch.bfloat16
+            self.use_autocast = True
+            self.use_scaler = False
+        elif precision == "fp16":
+            self.autocast_dtype = torch.float16
+            self.use_autocast = (self.device.type == "cuda")
+            self.use_scaler = (self.device.type == "cuda")
+        else:  # fp32
+            self.autocast_dtype = torch.float32
+            self.use_autocast = False
+            self.use_scaler = False
+
+        self.fp16 = self.use_scaler
+        device_type = "cuda" if self.device.type == "cuda" else "cpu"
+        self.scaler = GradScaler(device_type, enabled=self.use_scaler)
+
+        # Gradient checkpointing
+        if getattr(config, "gradient_checkpointing", False):
+            if hasattr(self.model, "gradient_checkpointing_enable"):
+                self.model.gradient_checkpointing_enable()
+            elif hasattr(self.model, "model") and hasattr(self.model.model, "gradient_checkpointing_enable"):
+                self.model.model.gradient_checkpointing_enable()
+
+            if hasattr(self.model, "config"):
+                self.model.config.use_cache = False
+            if hasattr(self.model, "model") and hasattr(self.model.model, "config"):
+                self.model.model.config.use_cache = False
 
         # Best validation loss for checkpoint selection
         self.best_val_loss = float("inf")
@@ -176,7 +209,7 @@ class TAHIMIKTrainer:
         for step, batch in enumerate(dataloader, start=1):
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
-            with autocast(enabled=self.fp16):
+            with autocast(device_type=self.device.type, dtype=self.autocast_dtype, enabled=self.use_autocast):
                 model_outputs = self.model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
@@ -258,7 +291,7 @@ class TAHIMIKTrainer:
         for batch in dataloader:
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
-            with autocast(enabled=self.fp16):
+            with autocast(device_type=self.device.type, dtype=self.autocast_dtype, enabled=self.use_autocast):
                 model_outputs = self.model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
@@ -308,7 +341,7 @@ class TAHIMIKTrainer:
         return avg_losses
 
     def _save_checkpoint(self, epoch: int, stage: str, val_loss: float):
-        """Save model checkpoint if validation loss improved."""
+        """Save a checkpoint if validation loss improved."""
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
             checkpoint_dir = os.path.join(
@@ -320,6 +353,10 @@ class TAHIMIKTrainer:
             path = os.path.join(
                 checkpoint_dir, f"best_{stage}.pt"
             )
+            provenance = collect_run_metadata(seed=getattr(self.config, "seed", 42))
+            provenance["precision"] = self.precision
+            provenance["gradient_checkpointing"] = getattr(self.config, "gradient_checkpointing", False)
+
             payload = {
                 "schema_version": "1.0.0",
                 "epoch": epoch,
@@ -328,7 +365,7 @@ class TAHIMIKTrainer:
                 "val_loss": float(val_loss),
                 "model_fingerprint": compute_model_fingerprint(self.model),
                 "config": asdict(self.config) if hasattr(self.config, "__dataclass_fields__") else {},
-                "provenance": collect_run_metadata(seed=getattr(self.config, "seed", 42)),
+                "provenance": provenance,
             }
             torch.save(payload, path)
             logger.info(f"  Saved checkpoint: {path} (val_loss={val_loss:.4f})")

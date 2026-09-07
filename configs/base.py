@@ -70,6 +70,8 @@ class BaseConfig:
             raise ValueError("Stage 1 batch size and accumulation steps must be positive integers.")
         if self.stage2_batch_size <= 0 or self.stage2_gradient_accumulation_steps <= 0:
             raise ValueError("Stage 2 batch size and accumulation steps must be positive integers.")
+        if self.precision not in ("fp32", "fp16", "bf16"):
+            raise ValueError(f"Unsupported precision '{self.precision}'. Must be one of 'fp32', 'fp16', 'bf16'.")
 
     # ── Evaluation ──────────────────────────────────────────────────────
     eval_batch_size: int = 16
@@ -85,6 +87,9 @@ class BaseConfig:
     output_dir: str = "outputs"
     checkpoint_dir: str = "checkpoints"
 
-    # ── Device ──────────────────────────────────────────────────────────
+    # ── Hardware & Precision controls ───────────────────────────────────
     device: str = "cuda"           # "cuda" for Colab A100, "cpu" for local
-    fp16: bool = True              # Mixed precision for efficiency
+    fp16: bool = True              # Deprecated flag, kept for backward compat
+    precision: str = "fp16"        # "fp32" | "fp16" | "bf16"
+    gradient_checkpointing: bool = True
+

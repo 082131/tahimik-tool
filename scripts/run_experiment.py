@@ -70,6 +70,19 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default="outputs/experiment")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default=None,
+        choices=["fp32", "fp16", "bf16"],
+        help="Precision mode (default: from config)",
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable model gradient checkpointing",
+    )
 
     return parser.parse_args()
 
@@ -175,6 +188,10 @@ def main():
         config.device = args.device
         config.seed = args.seed
         config.checkpoint_dir = os.path.join(args.output_dir, "checkpoints")
+        if args.precision is not None:
+            config.precision = args.precision
+        if args.gradient_checkpointing is not None:
+            config.gradient_checkpointing = args.gradient_checkpointing
 
         # --- Train -----------------------------------------------------------
         model = ModelClass(config)
