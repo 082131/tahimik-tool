@@ -25,6 +25,7 @@ def test_manifest_resolves_only_from_training_labels():
         bounds=bounds,
         seed=42,
         source_split="train",
+        resource_versions={"reviewed_lexicon": "2026.09"},
     )
 
     # Observed rate: 4/10 = 0.40
@@ -51,6 +52,7 @@ def test_manifest_clamping_to_bounds():
         training_labels=training_labels,
         bounds=bounds,
         seed=42,
+        resource_versions={"reviewed_lexicon": "2026.09"},
     )
     assert manifest.categories["elongation"].observed_rate == pytest.approx(0.80)
     assert manifest.categories["elongation"].resolved_probability == pytest.approx(0.45)
@@ -60,8 +62,9 @@ def test_manifest_canonical_hashing_and_readiness():
     training_labels = [{"categories": ["abbreviation"]} for _ in range(3)]
     bounds = {"abbreviation": (0.0, 1.0)}
 
-    m1 = build_probability_manifest(training_labels, bounds, seed=42)
-    m2 = build_probability_manifest(training_labels, bounds, seed=42)
+    resources = {"reviewed_lexicon": "2026.09"}
+    m1 = build_probability_manifest(training_labels, bounds, seed=42, resource_versions=resources)
+    m2 = build_probability_manifest(training_labels, bounds, seed=42, resource_versions=resources)
 
     assert m1.manifest_id == m2.manifest_id
     assert len(m1.manifest_id) == 64  # SHA-256 hex string
@@ -82,6 +85,24 @@ def test_manifest_canonical_hashing_and_readiness():
         unready_manifest.require_ready()
 
 
+def test_manifest_rejects_tampered_or_incomplete_reporting_contract():
+    """Catches a fail-open manifest that could make an ineligible Stage 1 run look valid."""
+    manifest = build_probability_manifest(
+        [{"categories": ["abbreviation"]}],
+        {"abbreviation": (0.0, 1.0)},
+        resource_versions={"reviewed_lexicon": "2026.09"},
+    )
+    tampered = manifest.to_dict()
+    tampered["categories"]["abbreviation"]["upper_bound"] = 2.0
+    with pytest.raises(ValueError):
+        ProbabilityManifest.from_dict(tampered).require_ready()
+
+    incomplete = manifest.to_dict()
+    incomplete.pop("readiness_state")
+    with pytest.raises(ValueError):
+        ProbabilityManifest.from_dict(incomplete).require_ready()
+
+
 def test_no_identity_alternatives_in_dictionaries():
     for word, replacements in ABBREVIATIONS.items():
         assert word not in replacements, f"Identity alternative found in abbreviations: {word} -> {word}"
@@ -91,7 +112,12 @@ def test_no_identity_alternatives_in_dictionaries():
 
 
 def test_synthetic_generation_never_produces_identical_pair():
-    generator = TagalogNoiseGenerator(seed=123)
+    manifest = build_probability_manifest(
+        [{"categories": ["abbreviation"]}],
+        {"abbreviation": (0.0, 1.0)},
+        resource_versions={"reviewed_lexicon": "2026.09"},
+    )
+    generator = TagalogNoiseGenerator(seed=123, manifest=manifest)
     text = "Magandang umaga sa lahat ng tao dito sa Pilipinas!"
 
     for _ in range(50):
@@ -99,3 +125,15 @@ def test_synthetic_generation_never_produces_identical_pair():
         assert noisy != clean, f"Synthetic generation produced identical pair: '{noisy}' == '{clean}'"
         assert isinstance(lineage, SyntheticPairLineage)
         assert len(lineage.applied_correctable_categories) > 0
+
+
+def test_generate_pair_rejects_text_that_cannot_be_corrupted():
+    """Catches the old fallback that labelled an unchanged one-character input as char_swap."""
+    manifest = build_probability_manifest(
+        [{"categories": ["char_swap"]}],
+        {"char_swap": (0.0, 1.0)},
+        resource_versions={"reviewed_lexicon": "2026.09"},
+    )
+    generator = TagalogNoiseGenerator(seed=1, manifest=manifest)
+    with pytest.raises(ValueError, match="distinct synthetic pair"):
+        generator.generate_pair("a")

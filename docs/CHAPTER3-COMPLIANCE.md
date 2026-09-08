@@ -26,6 +26,6 @@
 
 ## Reproducibility and data controls
 
-Experiment JSON and checkpoints include git SHA, dirty-tree status, seed, resolved configuration, Python/package versions, and platform details. Gold pairs are normalized before splitting; identical duplicates collapse and conflicting targets stop the run for review. Synthetic data never rewrites slang, emoji, code-switching, or Taglish morphology.
+Experiment JSON and checkpoints include git SHA, dirty-tree status, seed, resolved configuration, Python/package versions, and platform details. Gold pairs are normalized before splitting; identical duplicates collapse and conflicting targets stop the run for review. Stage 1 requires an approved noise manifest; categories without implemented, reviewed local resources fail before generation. A Chapter 3 run remains ineligible until reviewed code-switching and Taglish-morphology resources are supplied and implemented.
 
 The annotator website and human annotation workflow are not represented by this training/evaluation code and must be supplied as a separate artifact.

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from src.data.noise_generator import TagalogNoiseGenerator
+from src.data.noise_policy import build_probability_manifest
 from src.data.preprocessing import DataPipeline
 from src.evaluation.metrics import NormalizationMetrics
 from src.evaluation.statistical_tests import StatisticalAnalysis
@@ -43,8 +44,14 @@ def test_holm_is_step_down_and_reports_adjusted_p():
 
 
 def test_protected_synthetic_categories_are_not_applied():
+    manifest = build_probability_manifest(
+        [{"categories": ["slang", "emoji"]}],
+        {"slang": (1.0, 1.0), "emoji": (1.0, 1.0)},
+        resource_versions={"reviewed_lexicon": "2026.09"},
+    )
     generator = TagalogNoiseGenerator(
         seed=7,
+        manifest=manifest,
         probabilities={"slang": 1.0, "emoji": 1.0},
     )
     text = "Ang sarap ng food!"

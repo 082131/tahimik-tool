@@ -17,6 +17,7 @@
 import sys
 import os
 import argparse
+import json
 import torch
 
 # Add project root to path
@@ -36,6 +37,7 @@ from src.training.losses import TAHIMIKLoss
 from src.training.trainer import TAHIMIKTrainer
 
 from src.data.preprocessing import DataPipeline
+from src.data.noise_policy import load_probability_manifest
 from src.data.dataset import NormalizationDataset
 from src.utils.logging_utils import setup_logger
 
@@ -78,6 +80,12 @@ def parse_args():
         help="Target number of synthetic pairs for Stage 1 (default: 1M)",
     )
     parser.add_argument(
+        "--noise_manifest",
+        type=str,
+        default=None,
+        help="Approved ProbabilityManifest JSON required whenever Stage 1 synthetic data is requested.",
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default="outputs",
@@ -114,6 +122,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.clean_corpus and not args.noise_manifest:
+        raise ValueError("--noise_manifest is required when --clean_corpus enables Stage 1")
+    manifest = load_probability_manifest(args.noise_manifest) if args.clean_corpus else None
 
     # ── Configuration ───────────────────────────────────────────────────
     ConfigClass, ModelClass = VARIANT_MAP[args.variant]
@@ -139,7 +150,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
     # ── Data Pipeline ───────────────────────────────────────────────────
-    pipeline = DataPipeline(config, seed=config.seed)
+    pipeline = DataPipeline(config, seed=config.seed, noise_manifest=manifest)
 
     # Load gold standard
     gold_noisy, gold_clean = pipeline.load_gold_standard(args.gold_data)
@@ -184,6 +195,11 @@ def main():
         syn_noisy, syn_clean, syn_noise = pipeline.generate_synthetic_pairs(
             clean_sentences, target_size=args.synthetic_size
         )
+        os.makedirs(args.output_dir, exist_ok=True)
+        with open(os.path.join(args.output_dir, "synthetic_lineage.json"), "w", encoding="utf-8") as handle:
+            json.dump([item.to_dict() for item in pipeline.synthetic_lineage], handle, indent=2)
+        with open(os.path.join(args.output_dir, "synthetic_diagnostics.json"), "w", encoding="utf-8") as handle:
+            json.dump(pipeline.synthetic_diagnostics, handle, indent=2)
         syn_splits = pipeline.split_data(
             syn_noisy, syn_clean, syn_noise,
             train_ratio=config.synthetic_train_ratio,

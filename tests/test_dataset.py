@@ -73,3 +73,16 @@ def test_collator_respects_pad_to_multiple_of(tokenizer):
     assert batch["input_ids"].shape[1] == 16
     assert batch["attention_mask"].shape[1] == 16
     assert batch["labels"].shape[1] == 16
+
+
+def test_collator_rounds_inputs_and_labels_independently(tokenizer):
+    """Catches input-derived padding that leaves decoder labels off the requested alignment."""
+    collator = NormalizationCollator(pad_token_id=tokenizer.pad_token_id, pad_to_multiple_of=8)
+    batch = collator([{
+        "input_ids": torch.ones(10, dtype=torch.long),
+        "attention_mask": torch.ones(10, dtype=torch.long),
+        "labels": torch.ones(3, dtype=torch.long),
+        "noise_level": torch.tensor(0.0),
+    }])
+    assert batch["input_ids"].shape == (1, 16)
+    assert batch["labels"].shape == (1, 8)
