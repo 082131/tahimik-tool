@@ -242,6 +242,35 @@ class BatchNormalizeResponse(BaseModel):
     total_time_ms: float
 
 
+class CompareRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2048)
+    max_length: int = Field(512, ge=16, le=2048)
+    num_beams: int = Field(4, ge=1, le=10)
+
+
+class CompareResult(BaseModel):
+    model: str
+    label: str
+    normalized: str
+    inference_time_ms: float
+    telemetry: Dict[str, Any]
+
+
+class CompareResponse(BaseModel):
+    input: str
+    results: List[CompareResult]
+
+
+class CompareBatchRequest(BaseModel):
+    texts: List[str] = Field(..., min_length=1, max_length=50)
+    max_length: int = Field(512, ge=16, le=2048)
+    num_beams: int = Field(4, ge=1, le=10)
+
+
+class CompareBatchResponse(BaseModel):
+    results: List[CompareResponse]
+
+
 # ── Inference ───────────────────────────────────────────────────────────
 @torch.no_grad()
 def normalize_texts(
@@ -297,6 +326,65 @@ def normalize_text(
         num_beams=num_beams,
     )
     return decoded_list[0], elapsed_ms
+
+
+@torch.no_grad()
+def run_model_with_telemetry(
+    text: str,
+    model_name: str,
+    max_length: int = 512,
+    num_beams: int = 4,
+) -> Tuple[str, Dict[str, Any], float]:
+    """Run one variant and return its decoded output with observed telemetry."""
+    tokenizer, model = get_model(model_name)
+    inputs = tokenizer(
+        [text],
+        return_tensors="pt",
+        max_length=1024,
+        truncation=True,
+        padding=True,
+    )
+    if device is not None:
+        inputs = {
+            key: value.to(device) if hasattr(value, "to") else value
+            for key, value in inputs.items()
+        }
+
+    start = time.perf_counter()
+    generated, model_telemetry = model.generate_with_telemetry(
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs["attention_mask"],
+        max_length=max_length,
+        num_beams=num_beams,
+    )
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+    if len(decoded) != 1 or len(model_telemetry) != 1:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model '{model_name}' returned an invalid single-input result.",
+        )
+
+    telemetry = dict(model_telemetry[0])
+    byte_count = len(text.encode("utf-8"))
+    telemetry["input_byte_count"] = byte_count
+    if telemetry.get("compression_mode") == "none":
+        telemetry["retained_byte_count"] = byte_count
+        telemetry["deleted_byte_count"] = 0
+        telemetry["retained_byte_positions"] = list(range(byte_count))
+        telemetry["deleted_byte_positions"] = []
+    return decoded[0], telemetry, elapsed_ms
+
+
+def require_all_variants_available() -> None:
+    """Reject study comparisons unless every configured variant is available."""
+    missing = [name for name in VARIANTS if not is_available(name)]
+    if missing:
+        labels = ", ".join(VARIANTS[name]["label"] for name in missing)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Comparison requires all three checkpoints; unavailable: {labels}.",
+        )
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────
@@ -356,6 +444,57 @@ def normalize_batch(req: BatchNormalizeRequest):
         for text, norm in zip(req.texts, normalized_list)
     ]
     return BatchNormalizeResponse(results=results, total_time_ms=round(total_ms, 2))
+
+
+@app.post("/compare", response_model=CompareResponse)
+def compare(req: CompareRequest):
+    """Compare all three study variants for one unlabelled inference input."""
+    require_all_variants_available()
+    results = []
+    for name, entry in VARIANTS.items():
+        normalized, telemetry, elapsed_ms = run_model_with_telemetry(
+            req.text,
+            name,
+            max_length=req.max_length,
+            num_beams=req.num_beams,
+        )
+        results.append(
+            CompareResult(
+                model=name,
+                label=entry["label"],
+                normalized=normalized,
+                inference_time_ms=round(elapsed_ms, 2),
+                telemetry=telemetry,
+            )
+        )
+    return CompareResponse(input=req.text, results=results)
+
+
+@app.post("/compare/batch", response_model=CompareBatchResponse)
+def compare_batch(req: CompareBatchRequest):
+    """Compare all variants for each unlabelled input without evaluation work."""
+    require_all_variants_available()
+    comparisons = []
+    for text in req.texts:
+        results = []
+        for name, entry in VARIANTS.items():
+            normalized, telemetry, elapsed_ms = run_model_with_telemetry(
+                text,
+                name,
+                max_length=req.max_length,
+                num_beams=req.num_beams,
+            )
+            results.append(
+                CompareResult(
+                    model=name,
+                    label=entry["label"],
+                    normalized=normalized,
+                    inference_time_ms=round(elapsed_ms, 2),
+                    telemetry=telemetry,
+                )
+            )
+        comparisons.append(CompareResponse(input=text, results=results))
+    return CompareBatchResponse(results=comparisons)
 
 
 # ── Run directly ───────────────────────────────────────────────────────
