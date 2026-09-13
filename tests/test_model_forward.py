@@ -24,6 +24,8 @@ from configs.mrt5_config import MrT5Config
 from configs.tahimik_config import TAHIMIKConfig
 import src.models.fixed_compression_byt5 as mrt5_module
 import src.models.noise_adaptive_byt5 as tahimik_module
+import src.models.byt5_baseline as baseline_module
+from configs.byt5_config import ByT5Config
 from src.training.losses import TAHIMIKLoss
 
 
@@ -62,7 +64,7 @@ def _tiny_t5():
 @pytest.fixture
 def patched(monkeypatch):
     """Swap the pretrained loads for a tiny local model in both variants."""
-    for module in (mrt5_module, tahimik_module):
+    for module in (mrt5_module, tahimik_module, baseline_module):
         monkeypatch.setattr(
             module, "T5ForConditionalGeneration",
             type("_Stub", (), {"from_pretrained": staticmethod(lambda *a, **k: _tiny_t5())}),
@@ -247,6 +249,68 @@ def test_generate_runs_end_to_end(variant, patched, inputs):
 
     assert output_ids.shape[0] == BATCH
     assert output_ids.dtype == torch.long
+
+
+def test_baseline_generation_telemetry_reports_no_deletion(patched, inputs):
+    """The uncompressed baseline must report every non-padding token retained."""
+    input_ids, attention_mask, _, _ = inputs
+    model = baseline_module.ByT5Baseline(ByT5Config())
+
+    generated, telemetry = model.generate_with_telemetry(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_length=8,
+        num_beams=2,
+    )
+
+    assert generated.shape[0] == BATCH
+    assert telemetry == [
+        {
+            "compression_mode": "none",
+            "input_token_count": 24,
+            "kept_token_count": 24,
+            "deleted_token_count": 0,
+            "deletion_rate": 0.0,
+        },
+        {
+            "compression_mode": "none",
+            "input_token_count": 12,
+            "kept_token_count": 12,
+            "deleted_token_count": 0,
+            "deletion_rate": 0.0,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    ("variant", "compression_mode"),
+    [("mrt5", "fixed"), ("tahimik", "adaptive")],
+)
+def test_compressed_generation_telemetry_uses_hard_deletion_mask(
+    variant, compression_mode, patched, inputs
+):
+    """Compression telemetry must count the same mask used by generation."""
+    input_ids, attention_mask, _, _ = inputs
+    model, _ = _build(variant, patched)
+    model.delete_gate.hard_threshold = 0.0
+
+    generated, telemetry = model.generate_with_telemetry(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_length=8,
+        num_beams=2,
+    )
+
+    assert generated.shape[0] == BATCH
+    for item, expected_input_count in zip(telemetry, [24, 12]):
+        assert item["compression_mode"] == compression_mode
+        assert item["input_token_count"] == expected_input_count
+        assert item["kept_token_count"] == 0
+        assert item["deleted_token_count"] == expected_input_count
+        assert item["deletion_rate"] == 1.0
+        if compression_mode == "adaptive":
+            assert isinstance(item["noise_score"], float)
+            assert isinstance(item["target_deletion_rate"], float)
 
 
 # ── Training actually moves the gate ──────────────────────────────────────

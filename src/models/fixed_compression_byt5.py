@@ -202,6 +202,43 @@ class FixedCompressionByT5(nn.Module):
         then the decoder generates via beam search over the compressed
         encoder output.
         """
+        encoder_outputs, compressed_mask, _ = self._prepare_hard_deletion_encoder(
+            input_ids, attention_mask
+        )
+        return self.model.generate(
+            encoder_outputs=encoder_outputs,
+            attention_mask=compressed_mask,
+            max_length=max_length,
+            num_beams=num_beams,
+            early_stopping=True,
+        )
+
+    def generate_with_telemetry(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        max_length: int = 1024,
+        num_beams: int = 4,
+    ) -> tuple[torch.Tensor, list[dict]]:
+        """Generate text and report the hard-deletion mask actually used."""
+        encoder_outputs, compressed_mask, telemetry = self._prepare_hard_deletion_encoder(
+            input_ids, attention_mask
+        )
+        generated = self.model.generate(
+            encoder_outputs=encoder_outputs,
+            attention_mask=compressed_mask,
+            max_length=max_length,
+            num_beams=num_beams,
+            early_stopping=True,
+        )
+        return generated, telemetry
+
+    def _prepare_hard_deletion_encoder(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[BaseModelOutput, torch.Tensor, list[dict]]:
+        """Return the compressed encoder output and factual per-item counts."""
         self.eval()
 
         encoder = self.model.encoder
@@ -249,11 +286,25 @@ class FixedCompressionByT5(nn.Module):
         )
         hidden_states = encoder.final_layer_norm(post_gate_res.hidden_states)
 
-        # Beam-search decode
-        return self.model.generate(
-            encoder_outputs=BaseModelOutput(last_hidden_state=hidden_states),
-            attention_mask=compressed_mask,
-            max_length=max_length,
-            num_beams=num_beams,
-            early_stopping=True,
+        input_counts = attention_mask.sum(dim=1).detach().cpu().tolist()
+        kept_counts = compressed_mask.sum(dim=1).detach().cpu().tolist()
+        telemetry = []
+        for input_count, kept_count in zip(input_counts, kept_counts):
+            input_count = int(input_count)
+            kept_count = int(kept_count)
+            deleted_count = input_count - kept_count
+            telemetry.append(
+                {
+                    "compression_mode": "fixed",
+                    "input_token_count": input_count,
+                    "kept_token_count": kept_count,
+                    "deleted_token_count": deleted_count,
+                    "deletion_rate": deleted_count / input_count if input_count else 0.0,
+                }
+            )
+
+        return (
+            BaseModelOutput(last_hidden_state=hidden_states),
+            compressed_mask,
+            telemetry,
         )

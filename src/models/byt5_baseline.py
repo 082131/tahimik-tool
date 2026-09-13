@@ -102,3 +102,30 @@ class ByT5Baseline(nn.Module):
             num_beams=num_beams,
             early_stopping=True,
         )
+
+    def generate_with_telemetry(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        max_length: int = 1024,
+        num_beams: int = 4,
+    ) -> tuple[torch.Tensor, list[dict]]:
+        """Generate and report that the uncompressed baseline deletes nothing."""
+        generated = self.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_length=max_length,
+            num_beams=num_beams,
+        )
+        input_counts = attention_mask.sum(dim=1).detach().cpu().tolist()
+        telemetry = [
+            {
+                "compression_mode": "none",
+                "input_token_count": int(count),
+                "kept_token_count": int(count),
+                "deleted_token_count": 0,
+                "deletion_rate": 0.0,
+            }
+            for count in input_counts
+        ]
+        return generated, telemetry

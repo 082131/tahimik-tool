@@ -243,6 +243,43 @@ class NoiseAdaptiveByT5(nn.Module):
           5. Post-gate layers process the shorter sequence.
           6. The decoder generates via beam search.
         """
+        encoder_outputs, compressed_mask, _ = self._prepare_hard_deletion_encoder(
+            input_ids, attention_mask
+        )
+        return self.model.generate(
+            encoder_outputs=encoder_outputs,
+            attention_mask=compressed_mask,
+            max_length=max_length,
+            num_beams=num_beams,
+            early_stopping=True,
+        )
+
+    def generate_with_telemetry(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        max_length: int = 1024,
+        num_beams: int = 4,
+    ) -> tuple[torch.Tensor, list[dict]]:
+        """Generate text and report the hard-deletion mask actually used."""
+        encoder_outputs, compressed_mask, telemetry = self._prepare_hard_deletion_encoder(
+            input_ids, attention_mask
+        )
+        generated = self.model.generate(
+            encoder_outputs=encoder_outputs,
+            attention_mask=compressed_mask,
+            max_length=max_length,
+            num_beams=num_beams,
+            early_stopping=True,
+        )
+        return generated, telemetry
+
+    def _prepare_hard_deletion_encoder(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[BaseModelOutput, torch.Tensor, list[dict]]:
+        """Return the compressed encoder output and factual per-item counts."""
         self.eval()
 
         encoder = self.model.encoder
@@ -263,6 +300,7 @@ class NoiseAdaptiveByT5(nn.Module):
 
         # Noise estimation + gate
         noise_scores = self.noise_estimator(hidden_states, attention_mask)
+        target_deletion_rate = self.d_max * (1.0 - noise_scores.detach())
         gate_outputs, keep_prob, kept_mask, deletion_rate = self.delete_gate(
             hidden_states, attention_mask, noise_scores=noise_scores
         )
@@ -291,11 +329,31 @@ class NoiseAdaptiveByT5(nn.Module):
         )
         hidden_states = encoder.final_layer_norm(post_gate_res.hidden_states)
 
-        # Beam-search decode
-        return self.model.generate(
-            encoder_outputs=BaseModelOutput(last_hidden_state=hidden_states),
-            attention_mask=compressed_mask,
-            max_length=max_length,
-            num_beams=num_beams,
-            early_stopping=True,
+        input_counts = attention_mask.sum(dim=1).detach().cpu().tolist()
+        kept_counts = compressed_mask.sum(dim=1).detach().cpu().tolist()
+        noise_values = noise_scores.detach().cpu().tolist()
+        target_values = target_deletion_rate.detach().cpu().tolist()
+        telemetry = []
+        for input_count, kept_count, noise_score, target_rate in zip(
+            input_counts, kept_counts, noise_values, target_values
+        ):
+            input_count = int(input_count)
+            kept_count = int(kept_count)
+            deleted_count = input_count - kept_count
+            telemetry.append(
+                {
+                    "compression_mode": "adaptive",
+                    "input_token_count": input_count,
+                    "kept_token_count": kept_count,
+                    "deleted_token_count": deleted_count,
+                    "deletion_rate": deleted_count / input_count if input_count else 0.0,
+                    "noise_score": float(noise_score),
+                    "target_deletion_rate": float(target_rate),
+                }
+            )
+
+        return (
+            BaseModelOutput(last_hidden_state=hidden_states),
+            compressed_mask,
+            telemetry,
         )
