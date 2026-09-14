@@ -39,27 +39,21 @@ type CompareModelResult = {
 };
 
 const DEMO_SENTENCE: SentenceData = {
-  input: "Sanaol nlng tlga sa inyo mga lodi ang ganda ng araw nyo dyan!",
-  byt5: "Sana all na lang talaga sa inyo mga lodi, ang ganda ng araw ninyo diyan!",
-  mrt5: "Sanaol lang sa inyo mga, ang ganda ng araw.",
-  tahimik: "Sana all na lang talaga sa inyo mga lodi, ang ganda ng araw ninyo diyan!",
-  noise: 0.38,
-  pruning: 31,
+  input: "aang gandaaaa mooo!",
+  byt5: "Ang ganda mo!",
+  mrt5: "Ang ganda mo!",
+  tahimik: "Ang ganda mo!",
+  noise: 0.36,
+  pruning: 32,
   latencyByt5: "138 ms",
   latencyMrt5: "74 ms",
   latencyTahimik: "82 ms",
   tokens: [
-    { text: "Sanaol", kept: true }, { text: "nlng", kept: false },
-    { text: "tlga", kept: false }, { text: "sa", kept: true },
-    { text: "inyo", kept: true }, { text: "mga", kept: true },
-    { text: "lodi", kept: false }, { text: "ang", kept: true },
-    { text: "ganda", kept: true }, { text: "ng", kept: true },
-    { text: "araw", kept: true }, { text: "nyo", kept: false },
-    { text: "dyan!", kept: false },
+    { text: "aang", kept: true }, { text: "gandaaaa", kept: true },
+    { text: "mooo!", kept: true },
   ],
-  // 19 of the 61 ASCII byte positions are removed: 31%, matching the target shown below.
-  // The positions are intentionally scattered so the visual does not imply word deletion.
-  bytePrunedPositions: [1, 4, 8, 10, 13, 15, 18, 21, 23, 26, 29, 32, 35, 39, 42, 45, 49, 53, 58],
+  // Six redundant positions from the 19-byte input are removed: 32% after rounding.
+  bytePrunedPositions: [0, 10, 11, 12, 16, 17],
   isDemo: true,
 };
 
