@@ -7,10 +7,13 @@
 
 # Deep learning framework
 torch>=2.1.0
-transformers>=4.36.0
+# The custom encoder invokes T5 blocks directly; 4.45.2 is the last validated
+# Transformers release for that internal API. Keep the CI environment reproducible.
+transformers==4.45.2
 
 # Backend API and backend endpoint tests
 fastapi>=0.100.0
+httpx2>=0.1.0
 
 # Data processing
 pandas>=2.0.0
