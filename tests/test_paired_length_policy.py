@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src.data.dataset import NormalizationDataset
 from src.data.noise_label import compute_noise_level
+from src.data.noise_policy import SyntheticPairLineage, build_probability_manifest
 from src.data.preprocessing import DataPipeline, prepare_paired_examples
 
 
@@ -121,8 +122,25 @@ def test_dataset_rejects_unprepared_pair_instead_of_silent_truncation():
 
 
 def test_synthetic_pairs_are_prepared_before_their_noise_labels_are_returned():
-    pipeline = DataPipeline(seed=42)
-    pipeline.noise_gen.apply_noise = lambda _: "aang gandaaaa"
+    manifest = build_probability_manifest(
+        [{"categories": ["abbreviation"]}],
+        {"abbreviation": (0.0, 1.0)},
+        resource_versions={"reviewed_lexicon": "test"},
+    )
+    pipeline = DataPipeline(seed=42, noise_manifest=manifest)
+    pipeline.noise_gen.generate_pair = lambda _, pair_id, base_id: (
+        "aang gandaaaa",
+        "ang ganda",
+        SyntheticPairLineage(
+            pair_id=pair_id,
+            base_sentence_id=base_id,
+            manifest_id=manifest.manifest_id,
+            resource_versions=manifest.resource_versions,
+            applied_preserved_categories=[],
+            applied_correctable_categories=["abbreviation"],
+            seed_derivation=42,
+        ),
+    )
 
     noisy, clean, noise = pipeline.generate_synthetic_pairs(
         ["ang ganda"],

@@ -41,6 +41,7 @@ from src.training.losses import TAHIMIKLoss
 from src.training.trainer import TAHIMIKTrainer
 
 from src.data.preprocessing import DataPipeline, prepare_paired_examples
+from src.data.noise_policy import load_probability_manifest
 from src.data.dataset import NormalizationDataset, collate_fn
 from src.evaluation.metrics import NormalizationMetrics
 from src.evaluation.efficiency import EfficiencyBenchmark
@@ -66,6 +67,7 @@ def parse_args():
     parser.add_argument("--gold_data", type=str, required=True)
     parser.add_argument("--clean_corpus", type=str, default=None)
     parser.add_argument("--synthetic_size", type=int, default=1_000_000)
+    parser.add_argument("--noise_manifest", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="outputs/experiment")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
@@ -88,6 +90,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.clean_corpus and not args.noise_manifest:
+        raise ValueError("--noise_manifest is required when --clean_corpus enables Stage 1")
+    manifest = load_probability_manifest(args.noise_manifest) if args.clean_corpus else None
     configure_determinism(args.seed)
 
     torch.manual_seed(args.seed)
@@ -101,7 +106,7 @@ def main():
     base_config = ByT5Config()
     base_config.seed = args.seed
     tokenizer = AutoTokenizer.from_pretrained(base_config.model_name)
-    pipeline = DataPipeline(base_config, seed=args.seed)
+    pipeline = DataPipeline(base_config, seed=args.seed, noise_manifest=manifest)
 
 
     gold_noisy, gold_clean = pipeline.load_gold_standard(args.gold_data)
@@ -149,6 +154,10 @@ def main():
             clean_sentences, tokenizer, base_config.max_input_length,
             base_config.max_target_length, target_size=args.synthetic_size,
         )
+        with open(os.path.join(args.output_dir, "synthetic_lineage.json"), "w", encoding="utf-8") as handle:
+            json.dump([item.to_dict() for item in pipeline.synthetic_lineage], handle, indent=2)
+        with open(os.path.join(args.output_dir, "synthetic_diagnostics.json"), "w", encoding="utf-8") as handle:
+            json.dump(pipeline.synthetic_diagnostics, handle, indent=2)
         syn_splits = pipeline.split_data(
             syn_noisy, syn_clean, syn_noise,
             train_ratio=base_config.synthetic_train_ratio,

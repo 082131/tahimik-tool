@@ -44,19 +44,34 @@ class ProbabilityManifest:
     categories: Dict[str, CategoryProbability]
     resource_versions: Dict[str, str]
     created_at: str
-    readiness_state: str = "ready"  # "ready" or "draft"
+    readiness_state: str = "draft"  # "ready" or "draft"
 
     def require_ready(self) -> None:
         """Fail-closed check ensuring all categories and resources are approved and ready."""
         if self.readiness_state != "ready":
             raise ValueError(f"ProbabilityManifest is not ready (state={self.readiness_state})")
+        if self.source_split != "train":
+            raise ValueError("ProbabilityManifest must be derived from the training split")
+        if not self.manifest_id or not self.split_fingerprint:
+            raise ValueError("ProbabilityManifest is missing its identity or training fingerprint")
+        if not self.resource_versions:
+            raise ValueError("ProbabilityManifest has no approved resource versions")
         if not self.categories:
             raise ValueError("ProbabilityManifest has no approved category records")
         for cat, prob in self.categories.items():
-            if prob.lower_bound > prob.upper_bound:
+            expected_group = "preserved_augmentation" if cat in PRESERVED_CATEGORIES else "correctable_noise"
+            if cat not in PRESERVED_CATEGORIES | CORRECTABLE_CATEGORIES or prob.category != cat:
+                raise ValueError(f"Unknown or malformed category record: {cat}")
+            if prob.group != expected_group:
+                raise ValueError(f"Category {cat} has invalid group {prob.group!r}")
+            if not (0.0 <= prob.lower_bound <= prob.upper_bound <= 1.0):
                 raise ValueError(
-                    f"Category {cat} invalid bounds: lower {prob.lower_bound} > upper {prob.upper_bound}"
+                    f"Category {cat} has invalid probability bounds"
                 )
+            if not (0.0 <= prob.observed_rate <= 1.0 and 0.0 <= prob.resolved_probability <= 1.0):
+                raise ValueError(f"Category {cat} has an invalid probability")
+        if _canonical_digest(self.to_dict()) != self.manifest_id:
+            raise ValueError("ProbabilityManifest ID does not match its canonical contents")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -86,8 +101,16 @@ class ProbabilityManifest:
             categories=categories,
             resource_versions=data.get("resource_versions", {}),
             created_at=data.get("created_at", ""),
-            readiness_state=data.get("readiness_state", "ready"),
+            readiness_state=data.get("readiness_state", "draft"),
         )
+
+
+def load_probability_manifest(path: str) -> ProbabilityManifest:
+    """Load and validate a saved reporting manifest before Stage 1 begins."""
+    with open(path, "r", encoding="utf-8") as handle:
+        manifest = ProbabilityManifest.from_dict(json.load(handle))
+    manifest.require_ready()
+    return manifest
 
 
 PRESERVED_CATEGORIES = {"slang", "emoji", "code_switching", "taglish_morphology"}
@@ -123,6 +146,12 @@ def build_probability_manifest(
     """
     Derives category prevalence from training labels and approved bounds.
     """
+    if source_split != "train":
+        raise ValueError("Probability manifests may only be built from the training split")
+    if not training_labels:
+        raise ValueError("Training labels are required to build a reporting manifest")
+    if not resource_versions:
+        raise ValueError("Approved resource versions are required to build a reporting manifest")
     total_samples = len(training_labels)
     counts: Dict[str, int] = {}
     for item in training_labels:
@@ -131,8 +160,10 @@ def build_probability_manifest(
 
     categories: Dict[str, CategoryProbability] = {}
     for cat, (lower, upper) in bounds.items():
-        if lower > upper:
-            raise ValueError(f"Category {cat} lower bound {lower} exceeds upper bound {upper}")
+        if cat not in PRESERVED_CATEGORIES | CORRECTABLE_CATEGORIES:
+            raise ValueError(f"Unknown noise category: {cat}")
+        if not (0.0 <= lower <= upper <= 1.0):
+            raise ValueError(f"Category {cat} bounds must satisfy 0 <= lower <= upper <= 1")
         pos = counts.get(cat, 0)
         observed = (pos / total_samples) if total_samples > 0 else 0.0
         resolved = min(max(observed, lower), upper)
@@ -155,12 +186,13 @@ def build_probability_manifest(
         )
 
     split_fingerprint = hashlib.sha256(
-        f"{source_split}:{total_samples}:{seed}".encode("utf-8")
+        json.dumps(
+            {"source_split": source_split, "seed": seed, "training_labels": training_labels},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()[:16]
 
     created_at = datetime.now(timezone.utc).isoformat()
-    resource_versions = resource_versions or {"lexicon": "1.0.0"}
-
     manifest_dict = {
         "schema_version": "1.0.0",
         "source_split": source_split,

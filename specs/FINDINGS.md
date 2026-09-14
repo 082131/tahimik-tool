@@ -225,8 +225,8 @@ The manuscript alignment remediation completed and verified the following key fi
 3. **EMA Gradient Isolation**: `navg` update is executed under `torch.no_grad()`.
 4. **Preserved Relative Position Bias**: Layer index 1 relative position bias is preserved and gathered via `compress_position_bias` in `src/models/encoder_layers.py`.
 5. **Dynamic Padding & Collation**: `src/data/dataset.py` tokenizes with a 1,024-byte ceiling without static padding; batches are collated dynamically with `NormalizationCollator`.
-6. **Synthetic Noise Lineage & Policy**: Deterministic provenance manifests and pair generators prevent identity pairs.
-7. **Best-Stage-1 Checkpoint Handoff**: `src/training/trainer.py` enforces restoring `best_stage1.pt` on validation loss before constructing Stage 2 optimizers.
+6. **Synthetic Noise Lineage & Policy**: Stage 1 requires a validated manifest, records lineage/diagnostics, and rejects copy pairs. Code-switching and Taglish-morphology generation remain externally blocked until reviewed local resources are supplied and implemented.
+7. **Best-Stage-1 Checkpoint Handoff**: `src/training/trainer.py` restores `best_stage1.pt` before constructing Stage 2 optimizers and saves checkpoint parentage/state.
 8. **Aligned Alpha-Word Accuracy**: Sequence-aligned Levenshtein word matching prevents positional drift penalties.
 9. **Batched Non-Blocking Inference API**: `backend/app.py` executes single-call `model.generate()` over batches without blocking the async event loop.
 

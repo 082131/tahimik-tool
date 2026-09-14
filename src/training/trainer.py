@@ -26,6 +26,7 @@ logger = setup_logger("tahimik.trainer")
 
 @dataclass
 class HandoffRecord:
+    source_checkpoint_id: str
     source_checkpoint_path: str
     source_stage: str
     source_epoch: int
@@ -242,7 +243,8 @@ class TAHIMIKTrainer:
         self.best_val_loss = float("inf")
 
         pad_id = getattr(getattr(self.model, "tokenizer", None), "pad_token_id", 0)
-        self.collator = NormalizationCollator(pad_token_id=pad_id)
+        pad_multiple = 8 if self.device.type == "cuda" and self.precision in {"fp16", "bf16"} else None
+        self.collator = NormalizationCollator(pad_token_id=pad_id, pad_to_multiple_of=pad_multiple)
 
 
     def _create_optimizer(self) -> torch.optim.Optimizer:
@@ -420,7 +422,7 @@ class TAHIMIKTrainer:
 
         return avg_losses
 
-    def _save_checkpoint(self, epoch: int, stage: str, val_loss: float):
+    def _save_checkpoint(self, epoch: int, stage: str, val_loss: float, optimizer=None, scheduler=None):
         """Save a checkpoint if validation loss improved."""
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
@@ -448,16 +450,26 @@ class TAHIMIKTrainer:
                 "vocab_size": getattr(cfg, "vocab_size", None),
             }
 
+            model_fingerprint = compute_model_fingerprint(self.model)
+            checkpoint_id = hashlib.sha256(
+                f"{stage}:{epoch}:{val_loss}:{model_fingerprint}".encode("utf-8")
+            ).hexdigest()[:16]
             payload = {
                 "schema_version": "1.0.0",
+                "checkpoint_id": checkpoint_id,
                 "epoch": epoch,
                 "stage": stage,
                 "architecture": arch,
                 "model_state_dict": self.model.state_dict(),
                 "val_loss": float(val_loss),
-                "model_fingerprint": compute_model_fingerprint(self.model),
+                "model_fingerprint": model_fingerprint,
                 "config": asdict(self.config) if hasattr(self.config, "__dataclass_fields__") else {},
                 "provenance": provenance,
+                "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
+                "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+                "scaler_state_dict": self.scaler.state_dict(),
+                "parent_checkpoint_id": getattr(self, "stage1_checkpoint_id", None) if stage == "stage2" else None,
+                "handoff": asdict(self.handoff_record) if stage == "stage2" and hasattr(self, "handoff_record") else None,
             }
             torch.save(payload, path)
             logger.info(f"  Saved checkpoint: {path} (val_loss={val_loss:.4f})")
@@ -486,6 +498,8 @@ class TAHIMIKTrainer:
 
         if "model_state_dict" not in checkpoint:
             raise ValueError(f"Malformed checkpoint at {stage1_path}: missing 'model_state_dict'")
+        if not checkpoint.get("checkpoint_id"):
+            raise ValueError(f"Malformed checkpoint at {stage1_path}: missing 'checkpoint_id'")
 
         validate_checkpoint_architecture(
             checkpoint,
@@ -497,6 +511,7 @@ class TAHIMIKTrainer:
         fp = compute_model_fingerprint(self.model)
 
         record = HandoffRecord(
+            source_checkpoint_id=checkpoint["checkpoint_id"],
             source_checkpoint_path=stage1_path,
             source_stage="stage1",
             source_epoch=checkpoint.get("epoch", -1),
@@ -507,6 +522,7 @@ class TAHIMIKTrainer:
             model_fingerprint=fp,
         )
         self.handoff_record = record
+        self.stage1_checkpoint_id = checkpoint["checkpoint_id"]
         logger.info(
             f"Successfully restored Stage 1 best checkpoint (epoch={record.source_epoch}, "
             f"val_loss={record.source_val_loss:.4f}) for Stage 2 handoff."
@@ -619,7 +635,7 @@ class TAHIMIKTrainer:
                 logger.info(f"    Train Noise Bands: {', '.join(band_info)}")
 
             # Checkpoint
-            self._save_checkpoint(epoch, stage_name, val_losses["total_loss"])
+            self._save_checkpoint(epoch, stage_name, val_losses["total_loss"], optimizer, scheduler)
 
         return history
 
@@ -708,5 +724,3 @@ class TAHIMIKTrainer:
 
 # Alias for compatibility
 Trainer = TAHIMIKTrainer
-
-

@@ -139,18 +139,19 @@ class NormalizationCollator:
         )
 
         if self.pad_to_multiple_of is not None and self.pad_to_multiple_of > 0:
-            seq_len = padded_inputs.shape[1]
-            remainder = seq_len % self.pad_to_multiple_of
-            if remainder > 0:
-                pad_len = self.pad_to_multiple_of - remainder
+            input_remainder = padded_inputs.shape[1] % self.pad_to_multiple_of
+            if input_remainder > 0:
+                pad_len = self.pad_to_multiple_of - input_remainder
                 padded_inputs = torch.nn.functional.pad(
                     padded_inputs, (0, pad_len), value=self.pad_token_id
                 )
                 padded_masks = torch.nn.functional.pad(
                     padded_masks, (0, pad_len), value=0
                 )
+            label_remainder = padded_labels.shape[1] % self.pad_to_multiple_of
+            if label_remainder > 0:
                 padded_labels = torch.nn.functional.pad(
-                    padded_labels, (0, pad_len), value=-100
+                    padded_labels, (0, self.pad_to_multiple_of - label_remainder), value=-100
                 )
 
         return {

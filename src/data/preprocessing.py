@@ -7,11 +7,12 @@ import re
 import random
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional, Sequence
+from typing import Any, List, Tuple, Dict, Optional, Sequence
 from transformers import AutoTokenizer
 
 from src.data.noise_label import compute_noise_level
 from src.data.noise_generator import TagalogNoiseGenerator
+from src.data.noise_policy import ProbabilityManifest, SyntheticPairLineage
 from src.utils.logging_utils import setup_logger
 
 logger = setup_logger("tahimik.data")
@@ -210,10 +211,21 @@ class DataPipeline:
         seed: Random seed for reproducibility.
     """
 
-    def __init__(self, config=None, seed: int = 42):
+    def __init__(
+        self,
+        config=None,
+        seed: int = 42,
+        noise_manifest: Optional[ProbabilityManifest] = None,
+    ):
         self.config = config
         self.rng = random.Random(seed)
-        self.noise_gen = TagalogNoiseGenerator(seed=seed)
+        self.noise_manifest = noise_manifest
+        self.noise_gen = (
+            TagalogNoiseGenerator(seed=seed, manifest=noise_manifest)
+            if noise_manifest is not None else None
+        )
+        self.synthetic_lineage: List[SyntheticPairLineage] = []
+        self.synthetic_diagnostics: Dict[str, Any] = {}
 
     # --- Data Loading --------------------------------------------------------
 
@@ -351,30 +363,54 @@ class DataPipeline:
         Returns:
             Tuple of prepared (noisy_texts, clean_texts, noise_levels).
         """
+        if self.noise_gen is None or self.noise_manifest is None:
+            raise ValueError("Stage 1 synthetic generation requires a ready noise manifest")
+        if not clean_sentences:
+            raise ValueError("Cannot generate synthetic pairs from an empty clean corpus")
+
         noisy_texts = []
         clean_texts = []
-
-        # How many noisy variants per clean sentence to reach target
-        passes = max(1, target_size // len(clean_sentences))
-        remainder = target_size % len(clean_sentences)
+        noise_levels = []
+        self.synthetic_lineage = []
 
         logger.info(
-            f"Generating ~{target_size} synthetic pairs "
-            f"({passes} passes + {remainder} extra)"
+            f"Generating {target_size} manifest-governed synthetic pairs"
         )
 
-        for pass_num in range(passes):
-            for clean in clean_sentences:
-                noisy = self.noise_gen.apply_noise(clean)
-                noisy_texts.append(noisy)
-                clean_texts.append(clean)
-
-        # Fill remainder
-        extra = self.rng.sample(clean_sentences, min(remainder, len(clean_sentences)))
-        for clean in extra:
-            noisy = self.noise_gen.apply_noise(clean)
+        for index in range(target_size):
+            base = clean_sentences[index % len(clean_sentences)]
+            try:
+                noisy, clean, lineage = self.noise_gen.generate_pair(
+                    base, pair_id=f"syn_{index:08d}", base_id=str(index % len(clean_sentences))
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"Unable to generate requested synthetic pair {index + 1}/{target_size}: {exc}"
+                ) from exc
+            if noisy == clean:
+                raise ValueError("Synthetic generation produced a copy pair")
             noisy_texts.append(noisy)
             clean_texts.append(clean)
+            noise_levels.append(compute_noise_level(noisy, clean))
+            self.synthetic_lineage.append(lineage)
+
+        ordered_noise = sorted(noise_levels)
+        def quantile(q: float) -> float:
+            return ordered_noise[int((len(ordered_noise) - 1) * q)]
+        category_counts: Dict[str, int] = {}
+        for lineage in self.synthetic_lineage:
+            for category in lineage.applied_preserved_categories + lineage.applied_correctable_categories:
+                category_counts[category] = category_counts.get(category, 0) + 1
+        self.synthetic_diagnostics = {
+            "manifest_id": self.noise_manifest.manifest_id,
+            "requested_count": target_size,
+            "generated_count": len(noisy_texts),
+            "mean_noise": sum(noise_levels) / len(noise_levels),
+            "median_noise": quantile(0.5),
+            "noise_quantiles": {"q25": quantile(0.25), "q75": quantile(0.75)},
+            "zero_noise_fraction": sum(n == 0.0 for n in noise_levels) / len(noise_levels),
+            "category_counts": category_counts,
+        }
 
         prepared = prepare_paired_examples(
             noisy_texts,

@@ -8,6 +8,11 @@ import re
 from typing import List, Tuple, Optional, Dict
 from src.data.noise_policy import ProbabilityManifest, SyntheticPairLineage
 
+SUPPORTED_GENERATION_CATEGORIES = {
+    "abbreviation", "orthographic", "elongation", "punctuation",
+    "capitalization", "vowel_omission", "char_swap", "typo", "slang", "emoji",
+}
+
 # --- Common Filipino abbreviation dictionary ---------------------------------
 # Maps standard Tagalog words to their abbreviated social media forms.
 # Sourced from Filipino netspeak conventions documented in TagNorm.
@@ -110,21 +115,28 @@ class TagalogNoiseGenerator:
     ):
         self.seed = seed
         self.rng = random.Random(seed)
+        if manifest is None:
+            raise ValueError("A ready ProbabilityManifest is required for synthetic generation")
         self.manifest = manifest
 
         probs = dict(probabilities or {})
-        if manifest is not None:
-            manifest.require_ready()
-            for cat, cat_prob in manifest.categories.items():
-                probs[cat] = cat_prob.resolved_probability
+        manifest.require_ready()
+        unsupported = set(manifest.categories) - SUPPORTED_GENERATION_CATEGORIES
+        if unsupported:
+            raise ValueError(
+                "Approved local generation resources are not implemented for: "
+                + ", ".join(sorted(unsupported))
+            )
+        for cat, cat_prob in manifest.categories.items():
+            probs[cat] = cat_prob.resolved_probability
 
-        self.p_abbreviation = probs.get("abbreviation", 0.30)
-        self.p_orthographic = probs.get("orthographic", 0.20)
-        self.p_elongation = probs.get("elongation", 0.15)
-        self.p_punctuation = probs.get("punctuation", 0.15)
-        self.p_capitalization = probs.get("capitalization", 0.15)
-        self.p_vowel_omission = probs.get("vowel_omission", 0.20)
-        self.p_char_swap = probs.get("char_swap", 0.10)
+        self.p_abbreviation = probs.get("abbreviation", 0.0)
+        self.p_orthographic = probs.get("orthographic", 0.0)
+        self.p_elongation = probs.get("elongation", 0.0)
+        self.p_punctuation = probs.get("punctuation", 0.0)
+        self.p_capitalization = probs.get("capitalization", 0.0)
+        self.p_vowel_omission = probs.get("vowel_omission", 0.0)
+        self.p_char_swap = probs.get("char_swap", 0.0)
         self.p_slang = probs.get("slang", 0.0)
         self.p_emoji_insert = probs.get("emoji", 0.0)
 
@@ -262,12 +274,13 @@ class TagalogNoiseGenerator:
                     applied_correctable.append("elongation")
                 else:
                     source = self._apply_char_swap(source)
-                    applied_correctable.append("char_swap")
+                    if source != target:
+                        applied_correctable.append("char_swap")
+        if source == target:
+            raise ValueError("Cannot construct a distinct synthetic pair from this input")
 
-        manifest_id = self.manifest.manifest_id if self.manifest else "default"
-        resource_versions = (
-            self.manifest.resource_versions if self.manifest else {"lexicon": "1.0.0"}
-        )
+        manifest_id = self.manifest.manifest_id
+        resource_versions = self.manifest.resource_versions
 
         lineage = SyntheticPairLineage(
             pair_id=pair_id or f"syn_{self.rng.randint(100000, 999999)}",

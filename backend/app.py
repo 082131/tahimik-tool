@@ -338,6 +338,8 @@ def normalize_texts(
             for k, v in inputs.items()
         }
 
+    if device is not None and device.type == "cuda":
+        torch.cuda.synchronize(device)
     start = time.perf_counter()
     outputs = model.generate(
         input_ids=inputs["input_ids"],
@@ -345,6 +347,8 @@ def normalize_texts(
         max_length=max_length,
         num_beams=num_beams,
     )
+    if device is not None and device.type == "cuda":
+        torch.cuda.synchronize(device)
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
