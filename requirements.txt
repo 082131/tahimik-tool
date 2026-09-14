@@ -7,7 +7,7 @@
 
 # Deep learning framework
 torch>=2.1.0
-transformers>=4.36.0
+transformers>=4.36.0,<5.0.0
 
 # Backend API and backend endpoint tests
 fastapi>=0.100.0

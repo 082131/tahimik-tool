@@ -12,3 +12,11 @@ def test_requirements_include_fastapi_for_backend_test_collection():
     }
 
     assert "fastapi" in package_names
+
+
+def test_requirements_pin_transformers_to_the_supported_api_family():
+    requirements = (Path(__file__).parents[1] / "requirements.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert "transformers>=4.36.0,<5.0.0" in requirements
