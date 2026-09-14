@@ -24,7 +24,7 @@ escalated to the manuscript or left open.
 ### Class B — Manuscript-derived
 
 The author was not interrogated. Design decisions were taken from the ratified
-manuscript (`thesis_code/Group9_Final-Revised-Manuscript-v1.docx`) and from
+manuscript (`tmp/thesis/manuscripts/Group9_Final-Revised-Manuscript-v1.docx`) and from
 direct assessment of the existing code. Produced under time pressure ahead of a
 presentation, at the author's explicit instruction.
 

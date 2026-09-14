@@ -98,7 +98,9 @@ inline explanation of why the intuitive alternative silently breaks training.
 Decided in [`../DECISIONS.md`](../DECISIONS.md). **Not to be started before the
 presentation** — it replaces working, tested code.
 
-- [ ] T021 **HIGH** Add a top-level `LICENSE`/`NOTICE` and `ATTRIBUTIONS.md` crediting jkallini/mrt5 under Apache 2.0. Required *before* any of their code is vendored, not after (missing)
+- [ ] T021 **HIGH** Add a top-level `LICENSE`/`NOTICE` and
+  `docs/project/attributions.md` crediting jkallini/mrt5 under Apache 2.0.
+  Required *before* any of their code is vendored, not after (missing)
 - [ ] T022 Vendor `models/modeling_mrt5.py` from jkallini/mrt5 into `src/models/`, preserving its licence header. Prefer vendoring the single file over depending on the repo, which is a clone-not-pip research release whose `utils.py` expects a `BASE_PATH` macro to be edited (missing)
 - [ ] T023 Replace `src/models/delete_gate.py`'s gate with Stanford's, keeping `fixed_deletion_target = 0.5` and `delete_gate_layer = 3` — both already match the released configuration (missing)
 - [ ] T024 Revise `tests/test_delete_gate.py` and `tests/test_model_forward.py`, which assume the current gate's 4-tuple return signature (missing)

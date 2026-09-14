@@ -12,8 +12,9 @@ Efficient Byte-level Language Models* (ICLR 2025).
 
 **Licence**: Apache License 2.0
 
-**What is used**: two techniques from `models/modeling_mrt5.py`, adapted into
-`src/models/delete_gate.py`:
+**What is used**: Stanford's `SigmoidDeleteGate` initialization and
+`ScaledSigmoid(-logit)` convention for the MrT5 baseline, plus two techniques
+from `models/modeling_mrt5.py`, adapted into `src/models/delete_gate.py`:
 
 1. **Gumbel noise on the gate logits during training**, from
    `SigmoidDeleteGate.forward` and the `gumbel_noise_like` helper.
@@ -23,16 +24,11 @@ Efficient Byte-level Language Models* (ICLR 2025).
 
 Both are marked at their call sites in `src/models/delete_gate.py`.
 
-**What is deliberately not used**: the released
-[`stanfordnlp/mrt5-small`](https://huggingface.co/stanfordnlp/mrt5-small)
-checkpoint. It carries multilingual continued pretraining that this study's
-other two variants do not have, which would break the control-variable
-condition the three-way comparison depends on. See
-[`specs/DECISIONS.md`](specs/DECISIONS.md) AD-001.
-
-**What is not yet adopted**: Stanford's full `MrT5Stack` architecture. Their
-implementation rewrites the entire T5 encoder stack; this repository inserts a
-gate into HuggingFace's T5 instead. See AD-001 for the open question.
+**Model and gate source**: the compressed variants load
+[`stanfordnlp/mrt5-small`](https://huggingface.co/stanfordnlp/mrt5-small) via
+`AutoModelForSeq2SeqLM(..., trust_remote_code=True)`. TAHIMIK begins with the
+same Stanford gate then applies its noise-adaptive shift. The wrapper disables
+the embedded gate before applying its imported gate so deletion occurs once.
 
 ### Apache 2.0 notice
 
@@ -64,4 +60,4 @@ Loaded as a pretrained model; no code is vendored.
 
 ## Frontend assets
 
-See [`frontend/ATTRIBUTIONS.md`](frontend/ATTRIBUTIONS.md).
+See [`frontend/ATTRIBUTIONS.md`](../../frontend/ATTRIBUTIONS.md).

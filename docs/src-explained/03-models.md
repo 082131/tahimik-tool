@@ -255,7 +255,8 @@ low-value bytes. Used by both compressed variants.
 - **Input (forward):** `hidden_states`, `attention_mask`, optional `noise_scores`
 - **Output:** `gate_outputs`, `keep_prob`, `kept_mask`, `deletion_rate`
 - **Used by:** `fixed_compression_byt5.py`, `noise_adaptive_byt5.py`
-- **Connects to:** the MrT5 reference implementation (see `ATTRIBUTIONS.md`)
+- **Connects to:** the MrT5 reference implementation (see
+  [`../project/attributions.md`](../project/attributions.md))
 
 ### Where this fits in TAHIMIK
 This is **the compression engine — the single reason MrT5 and TAHIMIK are faster

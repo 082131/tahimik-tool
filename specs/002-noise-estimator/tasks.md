@@ -136,7 +136,9 @@ new tool.
 ## Final Phase: Polish
 
 - [ ] T015 [P] Run `quickstart.md` end to end and confirm every step in it works as written, correcting the doc if reality diverges
-- [ ] T016 Note in the PR description (per `CONTRIBUTING.md`'s PR-body requirement) which of T005–T014 `/speckit-converge` found already implemented versus newly written
+- [ ] T016 Note in the PR description (per
+  `docs/agents/contributing.md`'s PR-body requirement) which of T005–T014
+  `/speckit-converge` found already implemented versus newly written
 
 **Explicitly not a task**: the all-padding-batch edge case
 (`NEEDS CLARIFICATION` in `spec.md`) is deliberately excluded from this list,
@@ -192,7 +194,7 @@ User Story 2 or 3.
   `/speckit-converge`, run next, determines which of the two it actually is
   for this codebase.
 - Commit after each checkpoint, not after each task, to keep the history
-  readable per `CONTRIBUTING.md`'s "one logical change per commit" rule.
+  readable per `docs/agents/contributing.md`'s "one logical change per commit" rule.
 
 ---
 

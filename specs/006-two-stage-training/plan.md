@@ -24,7 +24,7 @@ unverified claim about noise-category coverage.
 `get_scheduler`), `editdistance` (for `n*`). No new dependency.
 
 **Storage**: Checkpoints written to `config.checkpoint_dir`, gitignored per
-`CONTRIBUTING.md`. No database.
+`docs/agents/contributing.md`. No database.
 
 **Testing**: `pytest`. No trainer test currently exists — this is the largest
 untested component in the repository.

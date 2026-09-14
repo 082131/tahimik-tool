@@ -141,4 +141,4 @@ whenever you have a view on output-key uniformity.
 
 - Every Phase 3 implementation task is "verify", not "build" — converge
   confirmed the code already satisfies them.
-- Commit at checkpoints, not per task, per `CONTRIBUTING.md`.
+- Commit at checkpoints, not per task, per `docs/agents/contributing.md`.

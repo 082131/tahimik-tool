@@ -10,7 +10,8 @@
 interrogating the author (`/grill-me`) rather than reading the existing
 implementation, per Constitution Principle II. Grounded in `README.md`
 ("Architecture Deep Dive: The Noise Estimator") and the ratified manuscript
-(`thesis_code/Group9_Final-Revised-Manuscript-v1.docx`), not in the code.
+(`tmp/thesis/manuscripts/Group9_Final-Revised-Manuscript-v1.docx`), not in
+the code.
 
 ## Plain-language summary
 

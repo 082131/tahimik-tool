@@ -14,20 +14,17 @@ Filipino social media text is full of abbreviations (*slmt* for *salamat*), char
 
 **Core insight:** not all sentences are equally noisy. A clean sentence can be aggressively compressed (deleting redundant bytes) for efficiency, while a noisy sentence should be preserved in full so the decoder has enough information to correct errors. TAHIMIK learns to estimate noise and adjust compression accordingly.
 
-**Model size**: `configs/base.py` authoritatively pins `google/byt5-base` as the base model backbone across all three variants (ByT5 baseline, MrT5 fixed compression, and TAHIMIK noise-adaptive), exactly matching the manuscript specification. See [`specs/FINDINGS.md`](specs/FINDINGS.md) item 4 and [`specs/DECISIONS.md`](specs/DECISIONS.md) AD-002.
+**Model sources**: the uncompressed baseline uses `google/byt5-small`. MrT5 uses `stanfordnlp/mrt5-small` with Stanford's custom model code and pretrained delete gate. TAHIMIK starts from that MrT5 Small path and adds only the manuscript's noise-adaptive gate shift.
 
 ### Three Models Compared Under Identical Conditions
 
 | Variant | Compression | Purpose |
 |---------|------------|---------|
-| **ByT5-base** | None (every byte processed) | Accuracy ceiling |
-| **ByT5-base + fixed-rate deletion** | Fixed 50% deletion rate (MrT5-style delete gate) | Efficiency baseline |
-| **TAHIMIK (ByT5-base + noise-adaptive deletion)** | Noise-adaptive deletion | Best of both worlds |
+| **ByT5-small** | None (every byte processed) | Accuracy baseline |
+| **MrT5-small** | Stanford fixed delete gate | Efficiency baseline |
+| **TAHIMIK (MrT5-small + noise-adaptive shift)** | Noise-adaptive deletion | Proposed model |
 
-Same backbone (`google/byt5-base`), same data, same optimizer, same schedule — only the compression mechanism changes.
-All three variants are initialized independently from Google's pretrained `google/byt5-base` checkpoint; task-specific gate and estimator modules are randomly initialized.
-Neither `stanfordnlp/mrt5-small` nor an unofficial "MrT5-base" checkpoint is used; "MrT5-style" refers solely to the deletion mechanism.
-Layer 3 is retained as the absolute delete-gate location across both compressed variants for manuscript fidelity.
+All variants use their designated Small checkpoint. The two compressed variants share the Stanford MrT5 gate path; TAHIMIK modifies that gate's scores using a learned per-sentence noise estimate. Their checkpoint sources are deliberately recorded and validated, so similarly shaped Google and Stanford weights cannot be exchanged.
 
 ---
 
@@ -40,7 +37,7 @@ tested. What does not exist yet:
 | | State |
 |---|---|
 | Gold-standard dataset | Not collected — the annotation platform is still in development |
-| Trained checkpoints | None. Every run today is synthetic-only (Stage 1) |
+| Trained checkpoints | None. Fresh Small-model checkpoints are required |
 | Results | None. No research question is answered yet |
 | Demo tool | Returns HTTP 503 until a checkpoint exists |
 
@@ -63,7 +60,7 @@ Start here:
 | [`docs/PROCESS.md`](docs/PROCESS.md) | How the spec loop works and what it has caught |
 | [`docs/WHY.md`](docs/WHY.md) | Plain-language reasoning behind each project rule |
 | [`.specify/memory/constitution.md`](.specify/memory/constitution.md) | The five ratified principles everything answers to |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Branching, commits, PRs, review |
+| [`docs/agents/contributing.md`](docs/agents/contributing.md) | Branching, commits, PRs, review |
 
 `specs/00N-<name>/` holds one directory per component, each with a spec, the
 research behind it, a plan, and tasks.
@@ -139,8 +136,7 @@ tahimik/
 ├── .specify/
 │   └── memory/constitution.md   # Ratified project principles (v1.0.0)
 │
-├── CONTRIBUTING.md              # Branching, commits, PRs, review
-├── CLAUDE.md                    # Instructions for AI assistants
+├── CLAUDE.md                    # Pointer to docs/agents/README.md
 ├── requirements.txt
 └── .gitignore
 ```

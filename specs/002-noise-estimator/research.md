@@ -49,7 +49,7 @@ resolved. Tasks scoped to Stories 1–3 as written may proceed.
 noise level (n*)" — this is not a new choice, it's recognizing a decision
 the project already made. Introducing a second edit-distance library would
 be redundant and would violate the "don't add what already exists" instinct
-this repository's `CONTRIBUTING.md` asks for generally.
+this repository's `docs/agents/contributing.md` asks for generally.
 
 **Alternatives considered**: None — there is no reason to introduce a second
 library when one is already installed for this exact purpose.

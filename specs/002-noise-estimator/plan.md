@@ -43,7 +43,7 @@ since none of its acceptance criteria depend on GPU-only nondeterminism —
 gradient-presence checks on a tiny CPU model are exact regardless.
 
 **Project Type**: Single project (existing `src/`, `tests/`, `configs/`
-layout per `CONTRIBUTING.md`).
+layout per `docs/agents/contributing.md`).
 
 **Performance Goals**: N/A. The estimator is a small MLP; its own runtime
 cost is not the subject of this feature. Efficiency benchmarking belongs to

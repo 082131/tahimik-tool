@@ -2,7 +2,8 @@
 
 **For:** a fresh Claude Code session continuing this work.
 **Date of handoff:** 2026-08-28.
-**Repo:** `C:\Users\aimee\Downloads\tahimik-tool` (thesis repo; read `CLAUDE.md` first).
+**Repo:** `C:\Users\aimee\Downloads\tahimik-tool` (thesis repo; read
+`docs/agents/README.md` first).
 
 Read this whole file before acting. It captures who the user is, what was built,
 the exact documentation standard to keep consistent, the repo's rules, and what's
@@ -110,7 +111,7 @@ gaps inline where relevant (e.g. the one-tailed bootstrap in `05`, the
 
 ---
 
-## 5. Repo rules you MUST follow (from `CLAUDE.md` / `CONTRIBUTING.md`)
+## 5. Repo rules you MUST follow (from `workflow.md` / `contributing.md`)
 
 - **Never commit to `main`.** Branch as `<type>/<short-description>` (e.g.
   `docs/...`, `fix/...`). `main` is **not** branch-protected (free plan), so the
@@ -185,7 +186,8 @@ adaptivity); #8 `L_attn_reg` deviates from MrT5's paper.
 - Study docs: `docs/src-explained/README.md` (start), then `01`–`05`.
 - Defense strategy: `docs/DEFENSE-PREP.md`.
 - Known gaps: `specs/FINDINGS.md`. Decisions: `specs/DECISIONS.md`.
-- Project rules: `CLAUDE.md`, `CONTRIBUTING.md`, `docs/WHY.md`,
+- Project rules: `docs/agents/workflow.md`, `docs/agents/contributing.md`,
+  `docs/WHY.md`,
   `.specify/memory/constitution.md`.
 - Code entry points: `scripts/train.py`, `scripts/run_experiment.py`,
   `backend/app.py`.
