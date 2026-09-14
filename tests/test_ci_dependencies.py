@@ -12,6 +12,7 @@ def test_requirements_include_fastapi_for_backend_test_collection():
     }
 
     assert "fastapi" in package_names
+    assert "httpx2" in package_names
 
 
 def test_requirements_pin_transformers_to_the_supported_api_family():
