@@ -22,6 +22,8 @@ export type SentenceData = {
   latencyMrt5?: string;
   latencyTahimik?: string;
   tokens:  Token[];
+  /** Fixed byte positions for the presentation scenario; live runs supply backend telemetry instead. */
+  bytePrunedPositions?: number[];
   reference?: string;
   isFallback?: boolean;
   isDemo?: boolean;
@@ -53,6 +55,9 @@ const DEMO_SENTENCE: SentenceData = {
     { text: "araw", kept: true }, { text: "nyo", kept: false },
     { text: "dyan!", kept: false },
   ],
+  // 19 of the 61 ASCII byte positions are removed: 31%, matching the target shown below.
+  // The positions are intentionally scattered so the visual does not imply word deletion.
+  bytePrunedPositions: [1, 4, 8, 10, 13, 15, 18, 21, 23, 26, 29, 32, 35, 39, 42, 45, 49, 53, 58],
   isDemo: true,
 };
 
@@ -298,6 +303,13 @@ function GatingInspector({ sentence, isLoading }: { sentence: SentenceData; isLo
   const keptBytes   = Math.round(totalBytes * (1 - sentence.pruning / 100));
   const keptTokens  = sentence.tokens.filter((t) => t.kept).length;
   const pruneTokens = sentence.tokens.filter((t) => !t.kept).length;
+  const byteMapAvailable =
+    telemetryModel === "tahimik" &&
+    Boolean(sentence.bytePrunedPositions) &&
+    totalBytes === sentence.input.length;
+  const prunedBytePositions = new Set(sentence.bytePrunedPositions ?? []);
+  const mappedPrunedBytes = prunedBytePositions.size;
+  const mappedKeptBytes = totalBytes - mappedPrunedBytes;
 
   const models = [
     {
@@ -390,19 +402,28 @@ function GatingInspector({ sentence, isLoading }: { sentence: SentenceData; isLo
         </div>
       </div>
 
-      {/* Card 2 — Noise Estimator & Gate Mechanics */}
-      <div className="w-full rounded-[24px] bg-white p-5 sm:p-6 flex flex-col gap-4 min-w-0" style={{ border: "0.5px solid rgba(0,0,0,0.5)" }}>
-        <div className="flex items-center gap-3">
-          <CardLabel>Noise Estimator & Gate Mechanics</CardLabel>
-          <span className="font-['Inter',sans-serif] font-normal text-[clamp(0.58rem,0.85vw,11px)] text-[#bbb]">
-            — {telemetryModel === "tahimik" ? "TAHIMIK Adaptive" : "MrT5"}
+      {/* Unified Telemetry & Byte Gating Pipeline Card */}
+      <div className="w-full rounded-[24px] bg-white p-5 sm:p-6 flex flex-col gap-6 min-w-0 shadow-xs" style={{ border: "0.5px solid rgba(0,0,0,0.5)" }}>
+        {/* Header with Title and Byte Gating Summary */}
+        <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
+          <div className="flex items-center gap-3">
+            <CardLabel>Noise Estimator & Byte Gating Mechanics</CardLabel>
+            <span className="font-['Inter',sans-serif] font-normal text-[clamp(0.58rem,0.85vw,11px)] text-[#888]">
+              — {telemetryModel === "tahimik" ? "TAHIMIK Adaptive" : "MrT5"}
+            </span>
+          </div>
+          <span className="font-['Inter',sans-serif] font-medium text-[clamp(0.58rem,0.85vw,11px)] text-black/70 whitespace-nowrap">
+            {byteMapAvailable
+              ? `${mappedKeptBytes} retained • ${mappedPrunedBytes} removed • ${totalBytes} total bytes`
+              : `${keptBytes} retained • ${totalBytes - keptBytes} removed • ${totalBytes} total bytes`}
           </span>
         </div>
 
+        {/* Stage 1: Noise Estimation & Target Deletion Calculation */}
         {telemetryModel === "tahimik" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex flex-col gap-3">
-              <SubLabel>Noise Estimator</SubLabel>
+              <SubLabel>Stage 1 — Noise Density Estimation</SubLabel>
               <div className="flex flex-col gap-2">
                 <div className="w-full h-3 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.07)" }}>
                   <div className="h-full rounded-full transition-all duration-300" style={{ width: `${Math.max(sentence.noise * 100, 3)}%`, backgroundColor: CORAL }} />
@@ -418,24 +439,20 @@ function GatingInspector({ sentence, isLoading }: { sentence: SentenceData; isLo
               </IPill>
             </div>
             <div className="flex flex-col gap-3">
-              <SubLabel>Delete Gate Mechanics</SubLabel>
+              <SubLabel>Stage 2 — Score Each Byte</SubLabel>
               <div className="flex flex-wrap gap-2">
-                <IPill bg={LILAC}><span>Adaptive Shift: τ<sub>T</sub> = 3.42</span></IPill>
-                <IPill bg={LILAC}><span>Noise Baseline: η<sub>avg</sub> = 0.12</span></IPill>
-                <IPill bg={LILAC}><span>Gate Scaling: k = 3.0</span></IPill>
-                <IPill bg={LILAC}><span>Prune Threshold = {(sentence.pruning / 100).toFixed(2)}</span></IPill>
+                <IPill bg={LILAC}>Gate scores every byte position</IPill>
+                <IPill bg={LILAC}>Each score becomes retain or remove</IPill>
               </div>
               <IPill bg="white">
-                {sentence.noise <= 0.3
-                  ? "Adaptive shift: Lower noise enables aggressive byte compression"
-                  : "Adaptive shift: Higher noise allocates more byte capacity"}
+                Noise sets the deletion target; the gate decides individual bytes, not words.
               </IPill>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex flex-col gap-3">
-              <SubLabel>Noise Estimator</SubLabel>
+              <SubLabel>Stage 1 — Noise Density Estimation</SubLabel>
               <div className="flex flex-col gap-2">
                 <div className="w-full h-3 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.07)" }}>
                   <div className="h-full rounded-full" style={{ width: `${sentence.noise * 100}%`, backgroundColor: "#d0d0d0" }} />
@@ -449,7 +466,7 @@ function GatingInspector({ sentence, isLoading }: { sentence: SentenceData; isLo
               <IPill bg={CORAL}>Fixed Deletion Rate = 50% (noise-agnostic)</IPill>
             </div>
             <div className="flex flex-col gap-3">
-              <SubLabel>Fixed Gate Mechanics</SubLabel>
+              <SubLabel>Stage 2 — Static Delete Gate</SubLabel>
               <div className="flex flex-wrap gap-2">
                 <IPill bg="rgba(0,0,0,0.05)">Target Rate = 0.50</IPill>
                 <IPill bg="rgba(0,0,0,0.05)"><span>Noise Input = Disabled</span></IPill>
@@ -459,78 +476,78 @@ function GatingInspector({ sentence, isLoading }: { sentence: SentenceData; isLo
             </div>
           </div>
         )}
-      </div>
 
-      {/* Card 3 — Byte Gating Decision Map */}
-      <div className="w-full rounded-[24px] bg-white p-5 sm:p-6 flex flex-col gap-5 min-w-0" style={{ border: "0.5px solid rgba(0,0,0,0.5)" }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
-          <CardLabel>Byte Gating Decision Map</CardLabel>
-          <span className="font-['Inter',sans-serif] font-normal text-[clamp(0.58rem,0.85vw,11px)] text-[#888] whitespace-nowrap">
-            {(() => {
-              const effPrune = telemetryModel === "tahimik" ? sentence.pruning : telemetryModel === "mrt5" ? 50 : 0;
-              const words = sentence.input.split(/(\s+)/);
-              let total = 0;
-              let kept = 0;
-              let gIdx = 0;
-              for (const w of words) {
-                for (let i = 0; i < w.length; i++) {
-                  const isSpace = /\s/.test(w[i]);
-                  const k = isSpace ? true : effPrune <= 0 ? true : effPrune >= 100 ? false : ((gIdx * 31 + w[i].charCodeAt(0) * 17) % 100) >= effPrune;
-                  total++;
-                  if (k) kept++;
-                  gIdx++;
-                }
-              }
-              return `${kept} kept • ${total - kept} pruned • ${total} total bytes`;
-            })()}
+        {/* Visual Pipeline Connector */}
+        <div className="flex items-center gap-3 w-full">
+          <span className="flex-1 h-px bg-black/10 min-w-[20px]" />
+          <span className="font-['Inter',sans-serif] font-medium text-[10px] uppercase tracking-wider text-[#888] px-2">
+            Stage 3 — Per-byte Gate Decisions
           </span>
+          <span className="flex-1 h-px bg-black/10 min-w-[20px]" />
         </div>
 
-        {/* Clean, readable byte-by-byte layout grouped by words */}
-        <div className="flex flex-wrap gap-x-3.5 gap-y-3 items-center w-full min-w-0">
-          {(() => {
-            const effPrune = telemetryModel === "tahimik" ? sentence.pruning : telemetryModel === "mrt5" ? 50 : 0;
-            const words = sentence.input.split(/(\s+)/);
-            let gIdx = 0;
-            return words.map((w, wIdx) => {
-              if (!w || /^\s+$/.test(w)) return null;
-              const byteElements = [];
-              for (let i = 0; i < w.length; i++) {
-                const ch = w[i];
-                const code = ch.charCodeAt(0);
-                const isSpace = /\s/.test(ch);
-                const kept = isSpace ? true : effPrune <= 0 ? true : effPrune >= 100 ? false : ((gIdx * 31 + code * 17) % 100) >= effPrune;
-                const bytePos = gIdx;
-                gIdx++;
-                byteElements.push(
-                  <span
-                    key={i}
-                    className={`inline-flex items-center justify-center min-w-[19px] h-[26px] px-1 rounded-[4px] font-['Inter',sans-serif] text-[13px] transition-colors ${
-                      kept
-                        ? "bg-[#ddf075] text-black font-medium border border-black/25"
-                        : "bg-black/[0.04] text-black/35 line-through border border-black/10"
-                    }`}
-                    title={`Byte #${bytePos}: '${ch}' (0x${code.toString(16).toUpperCase()}) — ${kept ? "KEPT" : "PRUNED"}`}
-                  >
-                    {ch}
-                  </span>
-                );
-              }
-              return (
-                <div
-                  key={wIdx}
-                  className="inline-flex items-center gap-[2px] p-1 rounded-[8px] bg-black/[0.02] border border-black/10"
-                >
-                  {byteElements}
-                </div>
-              );
-            });
-          })()}
-        </div>
+        {/* Stage 3: Byte Gating Decision Map */}
+        <div className="flex flex-col gap-3.5">
+          {byteMapAvailable ? (
+            <>
+              <div className="flex flex-wrap gap-x-3.5 gap-y-3 items-center w-full min-w-0">
+                {(() => {
+                  const words = sentence.input.split(/(\s+)/);
+                  let bytePosition = 0;
+                  return words.map((word, wordIndex) => {
+                    if (!word) return null;
+                    if (/^\s+$/.test(word)) {
+                      bytePosition += word.length;
+                      return null;
+                    }
 
-        <div className="flex items-center gap-2 flex-wrap pt-1">
-          <IPill bg={LIME}>● KEPT</IPill>
-          <IPill bg="white">○ PRUNED</IPill>
+                    const byteElements = Array.from(word).map((character, characterIndex) => {
+                      const position = bytePosition++;
+                      const retained = !prunedBytePositions.has(position);
+                      return (
+                        <span
+                          key={characterIndex}
+                          className={`inline-flex items-center justify-center min-w-[19px] h-[26px] px-1 rounded-[4px] font-['Inter',sans-serif] text-[13px] transition-colors ${
+                            retained
+                              ? "bg-[#ddf075] text-black font-medium border border-black/25"
+                              : "bg-black/[0.04] text-black/35 line-through border border-black/10"
+                          }`}
+                          title={`Byte position ${position}: ${retained ? "RETAINED" : "REMOVED"}`}
+                        >
+                          {character}
+                        </span>
+                      );
+                    });
+                    return (
+                      <div key={wordIndex} className="inline-flex items-center gap-[2px] p-1 rounded-[8px] bg-black/[0.02] border border-black/10">
+                        {byteElements}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <IPill bg="rgba(221,239,117,0.55)">
+                  η<sub>i</sub> = {sentence.noise.toFixed(2)} → {sentence.pruning}% target → {mappedPrunedBytes}/{totalBytes} bytes removed
+                </IPill>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-[12px] border border-black/10 bg-black/[0.02] px-3 py-2.5 font-['Inter',sans-serif] text-[11px] text-[#666]">
+              Per-byte decisions appear here when byte-position telemetry is available for the selected run.
+            </div>
+          )}
+
+          {/* Legend and Flow Note */}
+          <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+            <div className="flex items-center gap-2">
+              <IPill bg={LIME}>● KEPT</IPill>
+              <IPill bg="white">○ PRUNED</IPill>
+            </div>
+            <span className="font-['Inter',sans-serif] text-[10px] text-[#888]">
+              Word outlines are reading guides only; the gate acts on individual bytes.
+            </span>
+          </div>
         </div>
       </div>
 
