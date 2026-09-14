@@ -2,6 +2,8 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { Pill, KpiCard } from "../shared";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8100";
+const DATA_MODE = import.meta.env.VITE_TAHIMIK_DATA_MODE ?? "demo";
+const IS_LIVE_MODE = DATA_MODE === "live";
 
 // ── Palette ──────────────────────────────────────────────────────────────
 
@@ -769,10 +771,23 @@ export default function Engine({
       .catch(() => setApiIsOnline(false));
   }, []);
 
-  // Normalize single sentence using backend API
+  // Presentation mode always restores the complete configured scenario.
+  // Set VITE_TAHIMIK_DATA_MODE=live to call the backend instead.
   const handleNormalize = useCallback(async () => {
     const text = inputText.trim();
     if (!text) return;
+
+    if (!IS_LIVE_MODE) {
+      const demo = { ...DEMO_SENTENCE };
+      setInputText(demo.input);
+      setBatchRows([demo]);
+      setIsBatch(false);
+      onBatchModeChange?.(false);
+      setSelected(0);
+      setShowSummary(false);
+      setApiStatusMessage(null);
+      return;
+    }
 
     setLoading(true);
     setApiStatusMessage(null);
