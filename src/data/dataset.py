@@ -45,6 +45,20 @@ class NormalizationDataset(Dataset):
         self.max_input_length = max_input_length
         self.max_target_length = max_target_length
 
+        for index, (noisy, clean) in enumerate(zip(noisy_texts, clean_texts)):
+            input_length = _token_length(tokenizer, noisy)
+            target_length = _token_length(tokenizer, clean)
+            if input_length > max_input_length:
+                raise ValueError(
+                    f"Pair {index} exceeds max_input_length ({input_length} > {max_input_length}). "
+                    "Prepare pairs before constructing NormalizationDataset."
+                )
+            if target_length > max_target_length:
+                raise ValueError(
+                    f"Pair {index} exceeds max_target_length ({target_length} > {max_target_length}). "
+                    "Prepare pairs before constructing NormalizationDataset."
+                )
+
         # Precompute noise levels if not provided — this avoids redundant
         # edit distance computation on every epoch.
         if precomputed_noise_levels is not None:
@@ -65,18 +79,16 @@ class NormalizationDataset(Dataset):
         # Tokenize input (noisy sentence) without fixed padding
         input_encoding = self.tokenizer(
             noisy,
-            max_length=self.max_input_length,
             padding=False,
-            truncation=True,
+            truncation=False,
             return_tensors="pt",
         )
 
         # Tokenize target (clean sentence) without fixed padding
         target_encoding = self.tokenizer(
             clean,
-            max_length=self.max_target_length,
             padding=False,
-            truncation=True,
+            truncation=False,
             return_tensors="pt",
         )
 
@@ -151,4 +163,15 @@ class NormalizationCollator:
 
 # Default collator instance using ByT5 standard pad_token_id=0
 collate_fn = NormalizationCollator(pad_token_id=0)
+
+
+def _token_length(tokenizer: AutoTokenizer, text: str) -> int:
+    """Return the active tokenizer length without allowing truncation."""
+    encoding = tokenizer(text, padding=False, truncation=False)
+    token_ids = encoding["input_ids"]
+    if hasattr(token_ids, "shape"):
+        return int(token_ids.shape[-1])
+    if token_ids and isinstance(token_ids[0], (list, tuple)):
+        return len(token_ids[0])
+    return len(token_ids)
 

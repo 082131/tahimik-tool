@@ -32,9 +32,8 @@ from src.models.byt5_baseline import ByT5Baseline
 from src.models.fixed_compression_byt5 import FixedCompressionByT5
 from src.models.noise_adaptive_byt5 import NoiseAdaptiveByT5
 
-from src.data.preprocessing import DataPipeline
+from src.data.preprocessing import DataPipeline, prepare_paired_examples
 from src.data.dataset import NormalizationDataset, NormalizationCollator, collate_fn
-from src.data.noise_label import compute_noise_level
 
 from src.evaluation.metrics import NormalizationMetrics
 from src.utils.logging_utils import setup_logger
@@ -81,13 +80,14 @@ def main():
     pipeline = DataPipeline(config, seed=config.seed)
     gold_noisy, gold_clean = pipeline.load_gold_standard(args.gold_data)
 
-    gold_noise_levels = [
-        compute_noise_level(n, c) for n, c in zip(gold_noisy, gold_clean)
-    ]
+    gold_prepared = prepare_paired_examples(
+        gold_noisy, gold_clean, tokenizer,
+        config.max_input_length, config.max_target_length,
+    )
 
     # Use only the test split (80/10/10 — last 10%)
     gold_splits = pipeline.split_data(
-        gold_noisy, gold_clean, gold_noise_levels,
+        gold_prepared.noisy_texts, gold_prepared.clean_texts, gold_prepared.noise_levels,
         train_ratio=config.gold_train_ratio,
         val_ratio=config.gold_val_ratio,
         test_ratio=config.gold_test_ratio,
