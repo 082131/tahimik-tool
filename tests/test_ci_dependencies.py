@@ -15,9 +15,9 @@ def test_requirements_include_fastapi_for_backend_test_collection():
     assert "httpx2" in package_names
 
 
-def test_requirements_pin_transformers_to_the_supported_api_family():
+def test_requirements_pin_transformers_to_the_encoder_api_version():
     requirements = (Path(__file__).parents[1] / "requirements.txt").read_text(
         encoding="utf-8"
     )
 
-    assert "transformers>=4.36.0,<5.0.0" in requirements
+    assert "transformers==4.48.3" in requirements
