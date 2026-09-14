@@ -91,7 +91,7 @@ export function SystemArchitecturePanel() {
         {" "}
         Training runs in two stages: synthetic pretraining on generated noisy
         and clean pairs, then fine-tuning on gold-standard annotations. Three
-        variants are compared under identical settings — a ByT5 baseline with
+        variants are compared under identical settings — ByT5 with
         no compression, MrT5 with a fixed deletion rate, and TAHIMIK with
         noise-adaptive deletion — and evaluated on GLEU+, chrF, error
         reduction rate, inference time, and peak GPU memory.
@@ -104,7 +104,7 @@ export function ProjectInfoPanel() {
   return (
     <InformationPanel compact>
       <div className="project-info__header">
-        <h2 className="project-info__title">Group 10 - Members</h2>
+        <h2 className="project-info__title">Group 9 - Members</h2>
         <span className="project-info__course">BSCS 3-1</span>
       </div>
 
