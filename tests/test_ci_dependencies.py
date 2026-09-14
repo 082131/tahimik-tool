@@ -20,4 +20,4 @@ def test_requirements_pin_transformers_to_the_encoder_api_version():
         encoding="utf-8"
     )
 
-    assert "transformers==4.48.3" in requirements
+    assert "transformers==4.45.2" in requirements
