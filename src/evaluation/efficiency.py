@@ -144,15 +144,26 @@ class EfficiencyBenchmark:
             else 0.0
         )
 
-        peak_gpu_memory = max(memory_runs) if memory_runs else None
+        mean_peak_gpu_memory = (
+            float(sum(memory_runs) / len(memory_runs)) if memory_runs else None
+        )
+        std_peak_gpu_memory = (
+            float(torch.tensor(memory_runs).std().item()) if len(memory_runs) > 1 else 0.0
+        ) if memory_runs else None
+        max_peak_gpu_memory = max(memory_runs) if memory_runs else None
 
         return {
             "avg_time_per_sentence": avg_time,
             "std_time_per_sentence": std_time,
             "per_sentence_time_seconds": per_sentence_time,
             "run_mean_time_seconds": run_means,
-            "peak_gpu_memory_mb": peak_gpu_memory,
+            # `peak_gpu_memory_mb` remains for consumers that expect one value;
+            # it is the mean of the per-run peaks required by Chapter 3.
+            "peak_gpu_memory_mb": mean_peak_gpu_memory,
             "peak_gpu_memory_runs_mb": memory_runs,
+            "mean_peak_gpu_memory_mb": mean_peak_gpu_memory,
+            "std_peak_gpu_memory_mb": std_peak_gpu_memory,
+            "max_peak_gpu_memory_mb": max_peak_gpu_memory,
             "gpu_memory_available": bool(memory_runs),
             "num_sentences": num_sentences,
         }

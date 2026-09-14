@@ -1,8 +1,8 @@
+import math
 import re
 from collections import Counter
 from typing import Dict, List, Optional
 
-import editdistance
 from sacrebleu.metrics import CHRF
 
 
@@ -47,7 +47,7 @@ class NormalizationMetrics:
         if not pred_tokens or not ref_tokens:
             return 100.0 if pred_tokens == ref_tokens else 0.0
 
-        scores = []
+        modified_precisions = []
         for order in range(1, 5):
             pred_ngrams = self._ngrams(pred_tokens, order)
             ref_ngrams = self._ngrams(ref_tokens, order)
@@ -55,37 +55,38 @@ class NormalizationMetrics:
             if not pred_ngrams:
                 continue
 
-            # Calculate precision & recall between prediction and ground-truth reference
+            # Manuscript modified precision: correct reference overlap minus
+            # source material retained beyond what the reference supports.
             overlap = sum((pred_ngrams & ref_ngrams).values())
             total_pred = sum(pred_ngrams.values())
-            total_ref = sum(ref_ngrams.values())
-
-            precision = overlap / max(total_pred, 1)
-            recall = overlap / max(total_ref, 1)
-
-            # Apply penalty only for source n-grams absent from the reference.
-            # N-grams that appear in both source and reference are correct to keep,
-            # so they should not be penalised (matches shotakoyama/gleu sdiff logic).
+            bad_copies = 0
             if source_tokens:
                 source_ngrams = self._ngrams(source_tokens, order)
-                # Keep only source n-grams the reference does NOT contain
-                source_only = Counter({
-                    ng: cnt
-                    for ng, cnt in source_ngrams.items()
-                    if ref_ngrams.get(ng, 0) == 0
-                })
-                bad_copies = sum((pred_ngrams & source_only).values())
-                penalty = max(1.0 - (bad_copies / max(total_pred, 1)), 0.0)
-            else:
-                penalty = 1.0
+                for ngram, predicted_count in pred_ngrams.items():
+                    copied_count = min(predicted_count, source_ngrams[ngram])
+                    reference_count = min(predicted_count, ref_ngrams[ngram])
+                    bad_copies += max(0, copied_count - reference_count)
 
-            # Combined order score
-            scores.append(min(precision, recall) * penalty)
+            modified_precision = (overlap - bad_copies) / total_pred
+            if modified_precision <= 0:
+                return 0.0
+            modified_precisions.append(modified_precision)
 
-        if not scores:
+        if not modified_precisions:
             return 0.0
 
-        return 100.0 * (sum(scores) / len(scores))
+        geometric_mean = math.exp(
+            sum(math.log(score) for score in modified_precisions)
+            / len(modified_precisions)
+        )
+        candidate_length = len(pred_tokens)
+        reference_length = len(ref_tokens)
+        brevity_penalty = (
+            1.0
+            if candidate_length > reference_length
+            else math.exp(1.0 - reference_length / candidate_length)
+        )
+        return 100.0 * brevity_penalty * geometric_mean
 
     def compute_gleu_plus(
         self,
@@ -111,24 +112,33 @@ class NormalizationMetrics:
         return self.chrf_scorer.corpus_score(predictions, [references]).score
 
     @staticmethod
-    def _err(pred: str, ref: str, noisy: str) -> float:
-        """Compute Error Reduction Rate (ERR) for a single sentence.
+    def _evaluation_tokens(text: str) -> List[str]:
+        """Return case-insensitive whitespace tokens with punctuation retained."""
+        return text.casefold().split()
 
-        Measures how much of the original edit distance to reference was eliminated:
-            ERR = (dist(noisy, ref) - dist(pred, ref)) / dist(noisy, ref)
+    @classmethod
+    def _correct_token_count(cls, prediction: str, reference: str) -> tuple[int, int]:
+        """Return aligned correct-token and reference-token counts for ERR."""
+        predicted_tokens = cls._evaluation_tokens(prediction)
+        reference_tokens = cls._evaluation_tokens(reference)
+        distance = cls._word_levenshtein(predicted_tokens, reference_tokens)
+        return max(0, len(reference_tokens) - distance), len(reference_tokens)
 
-        Returns:
-            1.0 if both noisy and pred already match ref,
-            0.0 if noisy matches ref but pred introduced errors,
-            or the normalized ratio of reduced edit distance.
-        """
-        before = editdistance.eval(noisy, ref)
-        after = editdistance.eval(pred, ref)
+    @classmethod
+    def _err(cls, pred: str, ref: str, noisy: str) -> float:
+        """Compute sentence ERR from token accuracy over Leave-As-Is."""
+        system_correct, reference_total = cls._correct_token_count(pred, ref)
+        baseline_correct, _ = cls._correct_token_count(noisy, ref)
 
-        if before == 0:
-            return 1.0 if after == 0 else 0.0
+        if reference_total == 0:
+            return 1.0 if not cls._evaluation_tokens(pred) else 0.0
 
-        return (before - after) / before
+        system_accuracy = system_correct / reference_total
+        baseline_accuracy = baseline_correct / reference_total
+        available_error = 1.0 - baseline_accuracy
+        if available_error == 0:
+            return 1.0 if system_accuracy == 1.0 else 0.0
+        return (system_accuracy - baseline_accuracy) / available_error
 
     def compute_err(
         self,
@@ -136,12 +146,24 @@ class NormalizationMetrics:
         references: List[str],
         noisy_inputs: List[str],
     ) -> float:
-        """Compute average Error Reduction Rate across the dataset."""
-        values = [
-            self._err(p, r, n)
-            for p, r, n in zip(predictions, references, noisy_inputs)
-        ]
-        return sum(values) / max(len(values), 1)
+        """Compute corpus ERR from pooled token totals before division."""
+        system_correct = baseline_correct = reference_total = 0
+        for prediction, reference, noisy in zip(predictions, references, noisy_inputs):
+            correct_system, total = self._correct_token_count(prediction, reference)
+            correct_baseline, _ = self._correct_token_count(noisy, reference)
+            system_correct += correct_system
+            baseline_correct += correct_baseline
+            reference_total += total
+
+        if reference_total == 0:
+            return 1.0 if not predictions else 0.0
+
+        system_accuracy = system_correct / reference_total
+        baseline_accuracy = baseline_correct / reference_total
+        available_error = 1.0 - baseline_accuracy
+        if available_error == 0:
+            return 1.0 if system_accuracy == 1.0 else 0.0
+        return (system_accuracy - baseline_accuracy) / available_error
 
     @staticmethod
     def _alphabetic_words(text: str) -> List[str]:
@@ -169,16 +191,24 @@ class NormalizationMetrics:
         return dp[m][n]
 
     @staticmethod
-    def _alpha(pred: str, ref: str) -> float:
-        """Compute word accuracy strictly for alphabetic words with sequence alignment."""
+    def _alpha_counts(pred: str, ref: str) -> tuple[int, int]:
+        """Return aligned correct and reference alpha-word counts."""
         pred_words = NormalizationMetrics._alphabetic_words(pred)
         ref_words = NormalizationMetrics._alphabetic_words(ref)
 
         if not ref_words:
-            return 1.0 if not pred_words else 0.0
+            return 0, 0
 
         dist = NormalizationMetrics._word_levenshtein(pred_words, ref_words)
-        return max(0.0, 1.0 - dist / len(ref_words))
+        return max(0, len(ref_words) - dist), len(ref_words)
+
+    @staticmethod
+    def _alpha(pred: str, ref: str) -> float:
+        """Compute alpha-word accuracy as a sentence-level percentage."""
+        correct, total = NormalizationMetrics._alpha_counts(pred, ref)
+        if total == 0:
+            return 100.0 if not NormalizationMetrics._alphabetic_words(pred) else 0.0
+        return 100.0 * correct / total
 
 
     def compute_alpha_word_accuracy(
@@ -186,12 +216,15 @@ class NormalizationMetrics:
         predictions: List[str],
         references: List[str],
     ) -> float:
-        """Compute mean alphabetic word accuracy across all predictions."""
-        values = [
-            self._alpha(p, r)
-            for p, r in zip(predictions, references)
-        ]
-        return sum(values) / max(len(values), 1)
+        """Compute corpus alpha-word accuracy as a percentage."""
+        correct = total = 0
+        for prediction, reference in zip(predictions, references):
+            sentence_correct, sentence_total = self._alpha_counts(prediction, reference)
+            correct += sentence_correct
+            total += sentence_total
+        if total == 0:
+            return 100.0 if not predictions else 0.0
+        return 100.0 * correct / total
 
     def compute_per_sentence(
         self,
@@ -223,8 +256,9 @@ class NormalizationMetrics:
         noisy_inputs: List[str],
     ) -> Dict[str, float]:
         """Compute dataset-level summary averages for all normalization metrics."""
-        per_sentence = self.compute_per_sentence(predictions, references, noisy_inputs)
         return {
-            metric: float(sum(scores) / max(len(scores), 1))
-            for metric, scores in per_sentence.items()
+            "gleu_plus": float(sum(self.compute_gleu_plus(predictions, references, noisy_inputs)) / max(len(predictions), 1)),
+            "chrf": self.compute_chrf(predictions, references),
+            "err": self.compute_err(predictions, references, noisy_inputs),
+            "alpha_word_accuracy": self.compute_alpha_word_accuracy(predictions, references),
         }

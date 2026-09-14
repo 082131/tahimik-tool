@@ -1,18 +1,5 @@
-# =============================================================================
-# Inter-Annotator Agreement for TAHIMIK Gold Standard Dataset
-#
-# From the manuscript (Inter-Annotator Agreement section):
-#
-#   Krippendorff's Alpha — Measures agreement among annotators who
-#       produced the gold-standard noisy-clean text pairs. Alpha is
-#       computed at the ordinal level (using edit distance ratios as
-#       the annotation values).
-#
-#   Interpretation (per Krippendorff, 2004):
-#       alpha >= 0.80  → reliable agreement
-#       alpha >= 0.67  → tentative, acceptable for some purposes
-#       alpha <  0.67  → unreliable
-# =============================================================================
+# Inter-annotator agreement using Krippendorff's alpha over edit distance ratios.
+
 
 import numpy as np
 from typing import List, Dict, Optional

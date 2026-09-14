@@ -4,6 +4,7 @@
 
 import torch
 import torch.nn as nn
+from transformers.models.t5.modeling_t5 import T5LayerNorm
 from typing import Tuple, Optional
 
 
@@ -12,7 +13,7 @@ def gumbel_noise_like(x: torch.Tensor) -> torch.Tensor:
     Sample Gumbel(0, 1) noise shaped like x.
 
     Adapted from the MrT5 reference implementation (jkallini/mrt5,
-    Apache 2.0) — see ATTRIBUTIONS.md. The epsilon guards the log from
+    Apache 2.0) — see docs/project/attributions.md. The epsilon guards the log from
     underflowing to -inf, and is loosened under fp16 where the smallest
     representable positive number is much larger.
     """
@@ -22,6 +23,35 @@ def gumbel_noise_like(x: torch.Tensor) -> torch.Tensor:
 
 
 from src.models.encoder_layers import HardDeletionResult
+
+
+def disable_embedded_mrt5_gate(model: nn.Module) -> bool:
+    """Disable MrT5Stack's own gate when this wrapper supplies the gate.
+
+    The Stanford stack is still retained for its pretrained encoder and
+    attention implementation.  Without this guard, the wrapper's imported
+    gate and the stack's built-in gate would both delete the same sequence.
+    """
+    encoder = getattr(model, "encoder", None)
+    blocks = getattr(encoder, "block", None)
+    gate_layer = getattr(getattr(model, "config", None), "delete_gate_layer", None)
+    if blocks is None or gate_layer is None or gate_layer >= len(blocks):
+        return False
+    block = blocks[gate_layer]
+    if not hasattr(block, "has_delete_gate"):
+        return False
+    block.has_delete_gate = False
+    return True
+
+
+def get_embedded_mrt5_gate(model: nn.Module) -> Optional[nn.Module]:
+    """Return Stanford's pretrained gate before the wrapper disables it."""
+    encoder = getattr(model, "encoder", None)
+    blocks = getattr(encoder, "block", None)
+    gate_layer = getattr(getattr(model, "config", None), "delete_gate_layer", None)
+    if blocks is None or gate_layer is None or gate_layer >= len(blocks):
+        return None
+    return getattr(blocks[gate_layer], "delete_gate", None)
 
 
 class DeleteGate(nn.Module):
@@ -55,9 +85,13 @@ class DeleteGate(nn.Module):
         self.use_gumbel_noise = use_gumbel_noise
 
         # ── Gate scoring layers (Equation 1 from MrT5) ─────────────────
-        # G = k * sigmoid(LayerNorm(H) @ W + b)
+        # G = k * sigmoid(-(LayerNorm(H) @ W + b)).  This is Stanford
+        # MrT5's ScaledSigmoid convention; k is negative, so values close to
+        # zero are kept and values close to k are deleted.
         # This produces per-byte scores in [k, 0].
-        self.layer_norm = nn.LayerNorm(hidden_dim)
+        # Stanford MrT5 uses T5's RMS layer norm (weight only), not PyTorch's
+        # mean-centering LayerNorm with an additive bias.
+        self.layer_norm = T5LayerNorm(hidden_dim)
         self.gate_linear = nn.Linear(hidden_dim, 1)
 
         # ── Noise-adaptive conditioning ─────────────────────────────────
@@ -97,6 +131,14 @@ class DeleteGate(nn.Module):
                 )
             raw_val = (torch.clamp_min(legacy_cn, 1e-6).expm1().clamp_min(1e-12)).log()
             state_dict[prefix + "raw_cn"] = raw_val
+
+        # Support Stanford MrT5 gate naming: feed_forward.weight -> gate_linear.weight, etc.
+        ff_weight = prefix + "feed_forward.weight"
+        if ff_weight in state_dict and (prefix + "gate_linear.weight") not in state_dict:
+            state_dict[prefix + "gate_linear.weight"] = state_dict.pop(ff_weight)
+        ff_bias = prefix + "feed_forward.bias"
+        if ff_bias in state_dict and (prefix + "gate_linear.bias") not in state_dict:
+            state_dict[prefix + "gate_linear.bias"] = state_dict.pop(ff_bias)
 
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
@@ -141,7 +183,7 @@ class DeleteGate(nn.Module):
         logits = self.gate_linear(normed)  # (batch, seq, 1)
 
         # Gumbel noise on the logits during training, from the MrT5 reference
-        # implementation (see ATTRIBUTIONS.md). Keep/delete is close to a
+        # implementation (see docs/project/attributions.md). Keep/delete is close to a
         # discrete decision, and without perturbation the gate can settle on a
         # choice early and never sample the alternative hard enough to learn
         # whether it was better. Training only — inference must be
@@ -150,8 +192,9 @@ class DeleteGate(nn.Module):
         if self.training and self.use_gumbel_noise:
             logits = logits + gumbel_noise_like(logits)
 
-        # Rescaled sigmoid: k * sigmoid(logits), bounded in [k, 0]
-        gate_outputs = self.k * torch.sigmoid(logits)
+        # Stanford MrT5's rescaled sigmoid: k * sigmoid(-logits), bounded in
+        # [k, 0].  Keep this direction when importing Stanford gate weights.
+        gate_outputs = self.k * torch.sigmoid(-logits)
 
         # ── Step 2: Apply noise-adaptive shift ──────────────────────────
         if self.noise_adaptive and noise_scores is not None:
@@ -241,7 +284,7 @@ class DeleteGate(nn.Module):
         new_seq_len = max(int(kept_counts.max().item()), 1)
 
         # Vectorised gather, adapted from the MrT5 reference implementation
-        # (see ATTRIBUTIONS.md). The previous version looped over the batch in
+        # (see docs/project/attributions.md). The previous version looped over the batch in
         # Python. That runs at inference, which is exactly what the efficiency
         # research question measures, so the loop's overhead landed on the two
         # compressed variants and understated the very saving they exist to
@@ -281,3 +324,62 @@ class DeleteGate(nn.Module):
             attention_mask=new_attention_mask,
             source_positions=src_positions,
         )
+
+
+def load_mrt5_pretrained_gate(
+    delete_gate: DeleteGate,
+    model_name: str,
+    source_gate: Optional[nn.Module] = None,
+) -> bool:
+    """
+    Attempt to load Stanford MrT5 pretrained delete gate weights into delete_gate.
+    Returns True if weights were loaded, False otherwise.
+    """
+    if not model_name or "mrt5" not in model_name.lower():
+        return False
+
+    try:
+        if source_gate is not None:
+            source_state = source_gate.state_dict()
+            gate_sd = {}
+            for key, value in source_state.items():
+                if key == "feed_forward.weight":
+                    gate_sd["gate_linear.weight"] = value
+                elif key == "feed_forward.bias":
+                    gate_sd["gate_linear.bias"] = value
+                elif key == "layer_norm.weight":
+                    gate_sd["layer_norm.weight"] = value
+                elif key == "layer_norm.bias":
+                    gate_sd["layer_norm.bias"] = value
+            if gate_sd:
+                delete_gate.load_state_dict(gate_sd, strict=False)
+                return True
+
+        import os
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+
+        if os.path.isdir(model_name) and os.path.exists(os.path.join(model_name, "model.safetensors")):
+            safetensor_path = os.path.join(model_name, "model.safetensors")
+        else:
+            safetensor_path = hf_hub_download(repo_id=model_name, filename="model.safetensors")
+
+        sd = load_file(safetensor_path)
+        gate_sd = {}
+        for k, v in sd.items():
+            if "delete_gate" in k:
+                if "feed_forward.weight" in k:
+                    gate_sd["gate_linear.weight"] = v
+                elif "feed_forward.bias" in k:
+                    gate_sd["gate_linear.bias"] = v
+                elif "layer_norm.weight" in k:
+                    gate_sd["layer_norm.weight"] = v
+                    gate_sd["layer_norm.bias"] = torch.zeros(v.size(0), dtype=v.dtype, device=v.device)
+
+        if gate_sd:
+            delete_gate.load_state_dict(gate_sd, strict=False)
+            return True
+    except Exception:
+        # Fallback gracefully (e.g. offline tests or mock models)
+        return False
+    return False

@@ -1,20 +1,8 @@
-# =============================================================================
-# Noise Level Computation (n*)
-#
-# Each sentence pair carries a noise level n*, computed automatically as the
-# byte-level edit distance between the noisy and normalized sentence, divided
-# by the length of the longer sentence. This produces a value in [0, 1]
-# representing the fraction of the sentence that required correction.
-#
-# n* serves as the supervision target for the noise estimator (L_NE).
-# Since the normalized reference is the clean version, the edit distance
-# between the two IS the noise itself.
-#
-# Reference: Manuscript Section "Gold Standard and Reliability Dataset
-#            Construction" and "Loss Computation" → L_NE.
-# =============================================================================
+# Computes normalized byte-level Levenshtein distance between noisy and clean text.
+# n* = edit_distance(noisy_bytes, clean_bytes) / max(len(noisy_bytes), len(clean_bytes))
 
 import editdistance
+
 
 
 def compute_noise_level(noisy_text: str, clean_text: str) -> float:

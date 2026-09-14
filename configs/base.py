@@ -22,7 +22,7 @@ class BaseConfig:
     """
 
     # ── Model identity ──────────────────────────────────────────────────
-    model_name: str = "google/byt5-base"   # HuggingFace model ID (manuscript specification)
+    model_name: str = "stanfordnlp/mrt5-small"   # HuggingFace model ID (MrT5 Small baseline)
 
 
     # ── Byte-level sequence constraints ─────────────────────────────────
@@ -51,16 +51,16 @@ class BaseConfig:
 
     # ── Training schedule ───────────────────────────────────────────────
     # Stage 1: synthetic data pretraining
-    # Physical batch size = 2, accumulation = 8 -> effective batch size = 16
+    # Physical batch size = 4, accumulation = 4 -> effective batch size = 16
     stage1_epochs: int = 3
-    stage1_batch_size: int = 2
-    stage1_gradient_accumulation_steps: int = 8
+    stage1_batch_size: int = 4
+    stage1_gradient_accumulation_steps: int = 4
 
     # Stage 2: gold standard fine-tuning
-    # Physical batch size = 2, accumulation = 4 -> effective batch size = 8
+    # Physical batch size = 4, accumulation = 2 -> effective batch size = 8
     stage2_epochs: int = 10
-    stage2_batch_size: int = 2
-    stage2_gradient_accumulation_steps: int = 4
+    stage2_batch_size: int = 4
+    stage2_gradient_accumulation_steps: int = 2
 
     warmup_ratio: float = 0.06
     lr_scheduler_type: str = "cosine"

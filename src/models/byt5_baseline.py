@@ -1,15 +1,5 @@
-# =============================================================================
-# ByT5 Baseline — No Compression (Accuracy Ceiling)
-#
-# This is the first of three model variants compared in the study.
-# It wraps the standard ByT5 encoder-decoder without any delete gate
-# or compression, establishing the maximum achievable normalization
-# accuracy when every byte is processed by every encoder layer.
-#
-# All three variants share the same tokenizer, optimizer, data splits,
-# and training schedule (control variables) — only the compression
-# mechanism differs (independent variable).
-# =============================================================================
+# Standard ByT5 baseline wrapper for text normalization without byte compression.
+
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, T5ForConditionalGeneration
@@ -18,11 +8,7 @@ from typing import Dict, Optional
 
 class ByT5Baseline(nn.Module):
     """
-    Vanilla ByT5 for text normalization (no compression).
-
-    This model serves as the accuracy ceiling: since no bytes are deleted,
-    the encoder has full access to the input. Any accuracy loss in MrT5
-    or TAHIMIK relative to this baseline is attributable to compression.
+    Standard uncompressed ByT5 model wrapper.
 
     Args:
         config: A ByT5Config (or BaseConfig) instance.

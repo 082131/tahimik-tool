@@ -1,14 +1,5 @@
-# =============================================================================
-# Data Preprocessing and Pipeline Management
-#
-# Handles loading, cleaning, splitting, and preparing data for the
-# two-stage training pipeline:
-#   Stage 1: Synthetic data pretraining (~1M pairs, 90/10 split)
-#   Stage 2: Gold standard fine-tuning (~15K pairs, 80/10/10 split)
-#
-# The same pipeline is used for all three model variants to ensure
-# the control variable (training data) is held constant.
-# =============================================================================
+# Data preprocessing and pipeline utilities: loading, cleaning, splitting, and pair generation.
+
 
 import json
 import csv
@@ -89,10 +80,8 @@ class DataPipeline:
                         if text:
                             sentences.append(text.strip())
 
-        # Filter by minimum word count (manuscript: >=4 words)
+        # Filter short sentences and sentences exceeding max byte length
         sentences = [s for s in sentences if len(s.split()) >= 4]
-
-        # Filter by maximum byte length (manuscript: <=1024 bytes)
         sentences = [s for s in sentences if len(s.encode("utf-8")) <= 1024]
 
         logger.info(f"Loaded {len(sentences)} clean sentences from {filepath}")
@@ -151,10 +140,8 @@ class DataPipeline:
 
     def clean_text(self, text: str) -> str:
         """
-        Apply basic text cleaning as described in the manuscript.
-
-        Replaces usernames with @ANON and URLs with <URL>.
-        Removes duplicate whitespace.
+        Normalize text: replace user mentions with @ANON, URLs with <URL>,
+        and collapse duplicate whitespace.
         """
         # Anonymize mentions
         text = _replace_mentions(text)

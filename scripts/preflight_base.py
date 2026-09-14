@@ -17,13 +17,23 @@ from configs.byt5_config import ByT5Config
 from configs.mrt5_config import MrT5Config
 from configs.tahimik_config import TAHIMIKConfig
 from src.models.byt5_baseline import ByT5Baseline
-from src.models.fixed_compression_byt5 import FixedCompressionByT5
-from src.models.noise_adaptive_byt5 import NoiseAdaptiveByT5
+from src.models.fixed_compression import FixedCompressionByT5
+from src.models.noise_adaptive import NoiseAdaptiveByT5
 
 VARIANTS = {
     "byt5": (ByT5Config, ByT5Baseline),
     "mrt5": (MrT5Config, FixedCompressionByT5),
     "tahimik": (TAHIMIKConfig, NoiseAdaptiveByT5),
+}
+
+# The study intentionally compares two different Small checkpoints: the
+# uncompressed Google ByT5 baseline and Stanford's MrT5 baseline/proposed
+# adaptive variant.  Do not collapse this into a generic "contains small"
+# check: that would accept the wrong pretrained source.
+EXPECTED_BACKBONES = {
+    "byt5": "google/byt5-small",
+    "mrt5": "stanfordnlp/mrt5-small",
+    "tahimik": "stanfordnlp/mrt5-small",
 }
 
 
@@ -43,7 +53,7 @@ def run_preflight(
     metadata_only: bool = False,
 ) -> Dict[str, Any]:
     """
-    Executes hardware and configuration preflight for ByT5-Base.
+    Executes hardware and configuration preflight for the required Small variants.
 
     Returns:
         Dict reporting model identity, effective batch sizes, parameter counts,
@@ -56,23 +66,24 @@ def run_preflight(
         "resolved_device": resolved_device,
         "cuda_available": torch.cuda.is_available(),
         "metadata_only": metadata_only,
-        "all_models_base": True,
+        "all_models_valid": True,
         "variants": {},
     }
 
     # Verify configs
     for name, (config_cls, _) in VARIANTS.items():
         cfg = config_cls()
-        is_base = (cfg.model_name == "google/byt5-base")
-        if not is_base:
-            result["all_models_base"] = False
+        is_expected_backbone = cfg.model_name == EXPECTED_BACKBONES[name]
+        if not is_expected_backbone:
+            result["all_models_valid"] = False
 
         s1_eff = cfg.stage1_batch_size * cfg.stage1_gradient_accumulation_steps
         s2_eff = cfg.stage2_batch_size * cfg.stage2_gradient_accumulation_steps
 
         result["variants"][name] = {
             "model_name": cfg.model_name,
-            "is_byt5_base": is_base,
+            "expected_model_name": EXPECTED_BACKBONES[name],
+            "is_expected_backbone": is_expected_backbone,
             "stage1_physical_batch": cfg.stage1_batch_size,
             "stage1_accumulation_steps": cfg.stage1_gradient_accumulation_steps,
             "stage1_effective_batch": s1_eff,
@@ -83,9 +94,9 @@ def run_preflight(
             "gradient_checkpointing": getattr(cfg, "gradient_checkpointing", True),
         }
 
-    if not result["all_models_base"]:
+    if not result["all_models_valid"]:
         result["success"] = False
-        result["error"] = "Not all model variants resolve to 'google/byt5-base'."
+        result["error"] = "One or more variants do not use their required Small checkpoint."
         return result
 
     if metadata_only:
@@ -174,7 +185,7 @@ def run_preflight(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="ByT5 Base hardware and configuration preflight")
+    parser = argparse.ArgumentParser(description="TAHIMIK Small-model hardware and configuration preflight")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--max-input-length", type=int, default=1024)
     parser.add_argument("--metadata-only", action="store_true", help="Inspect config metadata without downloading/running weights")

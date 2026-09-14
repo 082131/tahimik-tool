@@ -435,13 +435,17 @@ function GatingInspector({ sentence, isLoading }: { sentence: SentenceData; isLo
               </IPill>
             </div>
             <div className="flex flex-col gap-3">
-              <SubLabel>Stage 2 — Score Each Byte</SubLabel>
+              <SubLabel>Stage 2 — Delete Gate Mechanics</SubLabel>
               <div className="flex flex-wrap gap-2">
-                <IPill bg={LILAC}>Gate scores every byte position</IPill>
-                <IPill bg={LILAC}>Each score becomes retain or remove</IPill>
+                <IPill bg={LILAC}><span>Adaptive Shift: τ<sub>T</sub> = 3.42</span></IPill>
+                <IPill bg={LILAC}><span>Noise Baseline: η<sub>avg</sub> = 0.12</span></IPill>
+                <IPill bg={LILAC}><span>Gate Scaling: k = 3.0</span></IPill>
+                <IPill bg={LILAC}><span>Prune Threshold = {(sentence.pruning / 100).toFixed(2)}</span></IPill>
               </div>
               <IPill bg="white">
-                Noise sets the deletion target; the gate decides individual bytes, not words.
+                {sentence.noise <= 0.3
+                  ? "Adaptive shift: Lower noise enables aggressive byte compression"
+                  : "Adaptive shift: High noise reduces pruning to preserve character signal"}
               </IPill>
             </div>
           </div>

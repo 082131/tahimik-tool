@@ -4,8 +4,11 @@ Every gap the spec pass found between what the manuscript specifies and what
 the code does, ordered by how much it matters. Written to be read in one
 sitting and corrected.
 
-**Nothing here was fixed.** Convergence records; it does not edit code. Each
-item is a task waiting for a decision.
+**Historical record.** Findings 1–3 below describe the pre-remediation
+implementation. The current code implements the two-tailed add-one bootstrap,
+CI-gated significance, paired memory-difference summaries in GB, and
+signed-rank rank-biserial effect size. The remaining entries preserve the
+original audit trail and must not be treated as a current code reading.
 
 ---
 

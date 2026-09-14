@@ -71,11 +71,11 @@ def test_alpha_word_accuracy_is_sequence_aligned_not_positional_zip():
     # 1 insertion at beginning ("hoy"): words are shifted by 1
     pred = "hoy ang bilis tumakbo ng bata"
     score = metrics.compute_alpha_word_accuracy([pred], [ref])
-    # With alignment: 1 edit out of 5 words = 4/5 = 0.80
-    assert score >= 0.75
+    # With alignment: 1 edit out of 5 words = 4/5 = 80 percent.
+    assert score == pytest.approx(80.0)
 
     # Case insensitivity and punctuation handling
     pred2 = "ANG BILIS tumakbo, ng bata!"
-    assert metrics.compute_alpha_word_accuracy([pred2], [ref]) == pytest.approx(1.0)
+    assert metrics.compute_alpha_word_accuracy([pred2], [ref]) == pytest.approx(100.0)
 
 

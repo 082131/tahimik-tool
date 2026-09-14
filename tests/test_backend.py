@@ -158,3 +158,71 @@ def test_compare_batch_preserves_input_order_and_returns_every_variant(
         for item in results
     )
     assert mock_get_model.call_count == 6
+
+
+@patch("backend.app.is_available", return_value=True)
+@patch("fastapi.BackgroundTasks.add_task")
+def test_evaluate_queues_only_labelled_test_sets(mock_add_task, _available, client):
+    """Evaluation must require input/reference pairs and return a job identifier."""
+    response = client.post(
+        "/evaluate",
+        json={"examples": [{"input": "raw text", "reference": "clean text"}]},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["total_examples"] == 1
+    mock_add_task.assert_called_once()
+
+
+def test_evaluate_rejects_unlabelled_input(client):
+    response = client.post("/evaluate", json={"examples": [{"input": "raw text"}]})
+    assert response.status_code == 422
+
+
+def test_evaluate_status_returns_persisted_job_or_404(client, monkeypatch):
+    from backend import app as backend_app
+    monkeypatch.setattr(backend_app, "EVALUATION_JOBS", {"job-1": {"job_id": "job-1", "status": "running", "stage": "profiling", "total_examples": 2, "completed_examples": 1}})
+
+    response = client.get("/evaluate/job-1")
+    assert response.status_code == 200
+    assert response.json()["stage"] == "profiling"
+    assert client.get("/evaluate/missing").status_code == 404
+
+
+def test_model_loading_rejects_checkpoint_from_the_wrong_pretrained_source(monkeypatch):
+    """Same-size Small checkpoints must not cross the Google/Stanford boundary."""
+    from backend import app as backend_app
+    from types import SimpleNamespace
+
+    checkpoint = {
+        "architecture": {
+            "model_name": "google/byt5-small",
+            "d_model": 16,
+            "num_encoder_layers": 2,
+            "num_decoder_layers": 2,
+            "vocab_size": 32,
+        },
+        "model_state_dict": {},
+    }
+
+    class _Model:
+        def __init__(self, _config):
+            self.model = SimpleNamespace(config=SimpleNamespace(d_model=16, num_layers=2, num_decoder_layers=2, vocab_size=32))
+        def load_state_dict(self, *_args): pass
+        def to(self, *_args): return self
+        def eval(self): return self
+        def parameters(self): return []
+
+    monkeypatch.setattr(backend_app, "_loaded", {})
+    monkeypatch.setattr(backend_app, "device", torch.device("cpu"))
+    monkeypatch.setattr(backend_app, "checkpoint_path", lambda _name: SimpleNamespace(is_file=lambda: True, __str__=lambda self: "wrong-source.pt"))
+    monkeypatch.setattr(backend_app, "load_config", lambda _name: SimpleNamespace(model_name="stanfordnlp/mrt5-small"))
+    monkeypatch.setattr(backend_app.importlib, "import_module", lambda _name: SimpleNamespace(FixedCompressionByT5=_Model))
+    monkeypatch.setattr(backend_app.torch, "load", lambda *_args, **_kwargs: checkpoint)
+    monkeypatch.setitem(__import__("sys").modules, "transformers", SimpleNamespace(AutoTokenizer=SimpleNamespace(from_pretrained=lambda *_args, **_kwargs: object())))
+
+    with pytest.raises(Exception) as exc_info:
+        backend_app.get_model("mrt5")
+    assert getattr(exc_info.value, "status_code", None) == 503
+    assert "incompatible" in str(getattr(exc_info.value, "detail", "")).lower()

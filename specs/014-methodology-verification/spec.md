@@ -37,7 +37,9 @@ A researcher receives per-sentence latency and 20 independent peak-memory observ
 ### Edge Cases
 
 - A clean input identical to its reference and prediction receives a perfect score rather than a source-copy penalty.
-- Corpus ERR aggregates edit-distance totals; per-sentence ERR remains available only for paired resampling.
+- Corpus ERR pools case-insensitive, whitespace-token correct-match and
+  reference-token totals before applying the Leave-As-Is equation;
+  per-sentence ERR remains available for paired resampling.
 - Zero Wilcoxon differences and tied ranks remain well-defined.
 - CPU runs never invent GPU-memory values.
 
@@ -46,7 +48,11 @@ A researcher receives per-sentence latency and 20 independent peak-memory observ
 ### Functional Requirements
 
 - **FR-001**: GLEU+ MUST use generated, reference, and noisy-source n-grams; penalize only incorrectly preserved source material; aggregate orders with declared weights and brevity penalty; and score a perfect unchanged-clean output as perfect.
-- **FR-002**: Reported corpus ERR MUST aggregate error totals before division, while bootstrap inputs remain paired per sentence.
+- **FR-002**: ERR MUST use the manuscript's formal token-accuracy
+  Leave-As-Is equation. Evaluation tokens are whitespace-separated and
+  case-insensitive, with punctuation retained. The reported corpus score MUST
+  pool correct-token and reference-token totals before division, while
+  bootstrap inputs remain paired per sentence.
 - **FR-003**: Alpha-word accuracy MUST use one shared Unicode-aware definition across corpus and per-sentence outputs.
 - **FR-004**: Paired bootstrap MUST use 1,000 resamples, the two-tailed add-one formula, percentile 95% interval, direction-aware differences, and adjusted-p plus interval significance.
 - **FR-005**: Peak memory MUST use two-sided Wilcoxon on 20 paired runs and report mean/standard deviation per model, median and IQR of paired differences in GB, and matched-pairs rank-biserial correlation based on signed-rank sums.
@@ -76,5 +82,7 @@ A researcher receives per-sentence latency and 20 independent peak-memory observ
 
 ## Assumptions
 
-- The equations and prose in the current Chapter 3 manuscript are authoritative.
+- Where the Chapter 3 ERR prose conflicts with its displayed equation, the
+  displayed token-accuracy equation is authoritative (author decision,
+  2026-09-14).
 - The manuscript DOCX will not be edited by this feature.

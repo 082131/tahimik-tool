@@ -34,8 +34,8 @@ from configs.mrt5_config import MrT5Config
 from configs.tahimik_config import TAHIMIKConfig
 
 from src.models.byt5_baseline import ByT5Baseline
-from src.models.fixed_compression_byt5 import FixedCompressionByT5
-from src.models.noise_adaptive_byt5 import NoiseAdaptiveByT5
+from src.models.fixed_compression import FixedCompressionByT5
+from src.models.noise_adaptive import NoiseAdaptiveByT5
 
 from src.training.losses import TAHIMIKLoss
 from src.training.trainer import TAHIMIKTrainer

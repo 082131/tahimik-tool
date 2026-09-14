@@ -99,12 +99,12 @@ def test_gradient_accumulation_steps_and_loss_division():
 
 def test_effective_batch_size_configuration():
     config = ByT5Config()
-    # Stage 1: 2 * 8 = 16
-    assert config.stage1_batch_size == 2
-    assert config.stage1_gradient_accumulation_steps == 8
+    # Stage 1: 4 * 4 = 16
+    assert config.stage1_batch_size == 4
+    assert config.stage1_gradient_accumulation_steps == 4
     assert config.stage1_batch_size * config.stage1_gradient_accumulation_steps == 16
 
-    # Stage 2: 2 * 4 = 8
-    assert config.stage2_batch_size == 2
-    assert config.stage2_gradient_accumulation_steps == 4
+    # Stage 2: 4 * 2 = 8
+    assert config.stage2_batch_size == 4
+    assert config.stage2_gradient_accumulation_steps == 2
     assert config.stage2_batch_size * config.stage2_gradient_accumulation_steps == 8

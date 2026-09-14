@@ -213,9 +213,10 @@ $$
 
 ## Manuscript-to-code alignment
 
-The current function in `src/evaluation/metrics.py` is source-aware, but it does **not** currently implement the manuscript formula exactly. It uses an arithmetic average of `min(precision, recall) × copy penalty`, while the manuscript requires modified precision, a weighted geometric mean, and a brevity penalty.
-
-The code should implement the manuscript formula, not replace the manuscript formula with the current custom calculation.
+`src/evaluation/metrics.py` implements the manuscript formula: modified
+precision, a source-copy penalty, an equal-weight geometric mean, and brevity
+penalty. A non-positive modified precision returns GLEU+ = 0 because its
+logarithm is undefined.
 
 ### Operational settings that code may add
 
@@ -349,7 +350,8 @@ whether corpus chrF or mean sentence chrF is reported
 score scale: raw 0–1 or percentage 0–100
 ```
 
-The code currently reports mean sentence-level chrF in `compute_all`, on a 0–100 scale. These settings should be saved in experiment metadata and used consistently for every model.
+`compute_all` reports corpus chrF on SacreBLEU's 0–100 scale, while the
+sentence-level values are retained only for paired bootstrap resampling.
 
 ---
 
@@ -440,7 +442,10 @@ The model corrected 75% of the error that was originally available to correct.
 
 The ERR formula in the manuscript is consistent with the definition used by the cited MultiLexNorm normalization study. That study defines ERR as word-level accuracy normalized by the percentage of words that need normalization. It uses the Leave-As-Is output as the baseline, which therefore has ERR = 0. The cited study does **not** define ERR as a character-edit-distance improvement.
 
-The current code is not aligned with that definition because `_err` currently calculates:
+The implementation follows this definition. It case-folds whitespace-separated
+tokens while retaining punctuation, aligns token sequences before counting
+correct tokens, pools corpus token totals before division, and keeps
+sentence-level ERR values only for paired bootstrap resampling.
 
 ```text
 (character edit distance of noisy input to reference
@@ -448,7 +453,7 @@ The current code is not aligned with that definition because `_err` currently ca
 / character edit distance of noisy input to reference
 ```
 
-The recommended implementation is therefore to use the manuscript/MultiLexNorm definition:
+The implemented calculation is:
 
 ```text
 accuracy_system       = correctly normalized evaluation words / total evaluation words
@@ -459,7 +464,9 @@ ERR = (accuracy_system - accuracy_leave_as_is)
 
 Because a sentence-level model may insert, delete, split, or merge words, add one reproducible preprocessing rule: align each prediction and reference word sequence before counting correctly matched words. Word-level Levenshtein alignment may be used for this alignment step, but its distance must not replace the ERR formula. The metric remains an accuracy-based ERR, not an edit-distance ERR.
 
-For the final implementation, report the MultiLexNorm-style ERR in percentage form, keep the same evaluation-token and alignment rules for every model, and use Leave-As-Is as a sanity check: the unchanged noisy input should produce ERR = 0 (apart from rounding).
+ERR remains a ratio; Leave-As-Is produces ERR = 0 when errors are available to
+correct. The manuscript's conflicting edit-distance prose remains unchanged in
+the DOCX by author instruction.
 
 ---
 
@@ -529,13 +536,15 @@ $$
 
 ## Manuscript-to-code alignment concern
 
-The current code uses a sequence-aligned word-level Levenshtein score:
+The implementation uses sequence-aligned word-level Levenshtein matching to
+derive $T_s$, then reports the manuscript's $T_s/T_g\times100$ percentage.
 
 $$
 \max\left(0,1-\frac{word\ edit\ distance}{reference\ word\ count}\right)
 $$
 
-This gives the same value as the manuscript formula for the shared example, but can differ when there are insertions or deletions.
+This supplies a reproducible rule for insertions, deletions, and substitutions
+without replacing the manuscript formula.
 
 ## Recommended clarification to add under the manuscript formula
 
@@ -591,8 +600,8 @@ This is the behavior of the current code. It prevents an output with an unnecess
 The current implementation already uses word-level Levenshtein distance, but the methodology/code documentation should explicitly state these details:
 
 1. **Sequence rule:** use word-level Levenshtein alignment as described above.
-2. **Score scale:** the manuscript reports a percentage, while the code currently returns a ratio from 0 to 1. Multiply the reported result by 100, or clearly label the code output as a proportion before presentation.
-3. **Dataset aggregation:** the code calculates each sentence's score then takes the mean across sentences (macro average). State this explicitly. It is suitable for paired bootstrap testing because every sentence has one score.
+2. **Score scale:** code returns the manuscript's 0–100 percentage.
+3. **Dataset aggregation:** reported scores pool $T_s$ and $T_g$ across the corpus; sentence-level percentages are retained for paired bootstrap testing.
 4. **Token handling:** lowercase words and strip surrounding punctuation before retaining alphabetic tokens; exclude numbers, URLs, emojis, and alphanumeric tokens.
 
 Example:

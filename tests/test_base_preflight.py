@@ -8,28 +8,34 @@ from scripts.preflight_base import run_preflight
 def test_preflight_metadata_mode_runs_offline():
     result = run_preflight(device="cpu", max_input_length=1024, metadata_only=True)
     assert result["success"] is True
-    assert result["all_models_base"] is True
+    assert result["all_models_valid"] is True
     assert "variants" in result
-    for v in ("byt5", "mrt5", "tahimik"):
+    expected_models = {
+        "byt5": "google/byt5-small",
+        "mrt5": "stanfordnlp/mrt5-small",
+        "tahimik": "stanfordnlp/mrt5-small",
+    }
+    for v, model_name in expected_models.items():
         assert v in result["variants"]
-        assert result["variants"][v]["model_name"] == "google/byt5-base"
+        assert result["variants"][v]["model_name"] == model_name
+        assert result["variants"][v]["is_expected_backbone"] is True
         assert result["variants"][v]["stage1_effective_batch"] == 16
         assert result["variants"][v]["stage2_effective_batch"] == 8
 
 
-def test_preflight_rejects_non_base_backbone(monkeypatch):
+def test_preflight_rejects_non_small_backbone(monkeypatch):
     import scripts.preflight_base as pb
     mock_cfg = MagicMock()
-    mock_cfg.model_name = "google/byt5-small"
-    mock_cfg.stage1_batch_size = 2
-    mock_cfg.stage1_gradient_accumulation_steps = 8
-    mock_cfg.stage2_batch_size = 2
-    mock_cfg.stage2_gradient_accumulation_steps = 4
+    mock_cfg.model_name = "google/byt5-large"
+    mock_cfg.stage1_batch_size = 4
+    mock_cfg.stage1_gradient_accumulation_steps = 4
+    mock_cfg.stage2_batch_size = 4
+    mock_cfg.stage2_gradient_accumulation_steps = 2
     monkeypatch.setitem(pb.VARIANTS, "byt5", (lambda: mock_cfg, MagicMock))
 
     result = run_preflight(device="cpu", max_input_length=1024, metadata_only=True)
     assert result["success"] is False
-    assert result["all_models_base"] is False
+    assert result["all_models_valid"] is False
 
 
 @patch("scripts.preflight_base.load_variant_model")

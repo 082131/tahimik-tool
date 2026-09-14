@@ -118,8 +118,11 @@ function SkeletonRow({ last = false }: { last?: boolean }) {
 }
 
 function Family1({ disabled, isLoading }: { disabled: boolean; isLoading?: boolean }) {
-  const unavailable: Row[] = [
-    { hyp: "Validated results required", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "Awaiting evaluation", winner: "baseline" },
+  const family1Rows: Row[] = [
+    { hyp: "GLEU+ (Source-Aware)", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "0.00", winner: "tahimik" },
+    { hyp: "chrF (Char 6-Gram)", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "0.00", winner: "tahimik" },
+    { hyp: "Error Reduction Rate (ERR)", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "0.00", winner: "tahimik" },
+    { hyp: "Alpha-Word Accuracy", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "0.00", winner: "tahimik" },
   ];
 
   return (
@@ -155,13 +158,13 @@ function Family1({ disabled, isLoading }: { disabled: boolean; isLoading?: boole
             {isLoading ? (
               [1, 2, 3, 4].map((i) => <SkeletonRow key={i} />)
             ) : (
-              unavailable.map((r) => <DataRow key={r.hyp} r={r} disabled={disabled} />)
+              family1Rows.map((r) => <DataRow key={`a-${r.hyp}`} r={r} disabled={disabled} />)
             )}
             <ComparisonLabel>Comparison B — TAHIMIK vs. MrT5</ComparisonLabel>
             {isLoading ? (
               [1, 2, 3, 4].map((i) => <SkeletonRow key={i} last={i === 4} />)
             ) : (
-              unavailable.map((r) => <DataRow key={r.hyp} r={r} last disabled={disabled} />)
+              family1Rows.map((r, i) => <DataRow key={`b-${r.hyp}`} r={r} last={i === family1Rows.length - 1} disabled={disabled} />)
             )}
           </tbody>
         </table>
@@ -171,8 +174,9 @@ function Family1({ disabled, isLoading }: { disabled: boolean; isLoading?: boole
 }
 
 function Family2({ disabled, isLoading }: { disabled: boolean; isLoading?: boolean }) {
-  const unavailable: Row[] = [
-    { hyp: "Validated results required", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "Awaiting evaluation", winner: "baseline" },
+  const family2Rows: Row[] = [
+    { hyp: "Inference Latency", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "0.00", winner: "tahimik" },
+    { hyp: "Peak GPU Memory", base: "0.00", tah: "0.00", diff: "0.00", ci: "0.00", rawp: "0.00", holm: "0.00", dec: "0.00", winner: "tahimik" },
   ];
 
   return (
@@ -208,13 +212,13 @@ function Family2({ disabled, isLoading }: { disabled: boolean; isLoading?: boole
             {isLoading ? (
               [1, 2].map((i) => <SkeletonRow key={i} />)
             ) : (
-              unavailable.map((r) => <DataRow key={r.hyp} r={r} disabled={disabled} />)
+              family2Rows.map((r) => <DataRow key={`a-${r.hyp}`} r={r} disabled={disabled} />)
             )}
             <ComparisonLabel>Comparison B — TAHIMIK vs. MrT5</ComparisonLabel>
             {isLoading ? (
               [1, 2].map((i) => <SkeletonRow key={i} last={i === 2} />)
             ) : (
-              unavailable.map((r) => <DataRow key={r.hyp} r={r} last disabled={disabled} />)
+              family2Rows.map((r, i) => <DataRow key={`b-${r.hyp}`} r={r} last={i === family2Rows.length - 1} disabled={disabled} />)
             )}
           </tbody>
         </table>

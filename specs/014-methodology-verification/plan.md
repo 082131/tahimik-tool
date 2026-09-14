@@ -23,7 +23,7 @@
 | Area | Required behavior |
 |---|---|
 | GLEU+ | source-aware n-grams, declared order weights/brevity penalty, no penalty for correct unchanged-clean text |
-| ERR | corpus totals for reported score; sentence vector retained for resampling |
+| ERR | case-insensitive whitespace-token accuracy over Leave-As-Is; corpus totals for reported score and sentence vector retained for resampling |
 | Bootstrap | paired, two-tailed add-one p, percentile 95% CI, direction-aware, p-and-CI significance |
 | Wilcoxon | two-sided, paired 20 runs; signed-rank-sum rank-biserial |
 | Holm | sorted step-down stopping, monotonic adjusted p-values, explicit families |

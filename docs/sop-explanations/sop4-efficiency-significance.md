@@ -210,26 +210,32 @@ $$
 
 Its sign follows the code's difference direction. A strongly negative value means most nonzero differences favor TAHIMIK's lower memory; a strongly positive value means most favor the baseline. This is an effect-size description, not a substitute for the p-value.
 
-Implementation note: the current code names this value `rank_biserial`, but calculates the difference between the **counts** of positive and negative nonzero differences divided by the number of nonzero differences. A textbook rank-biserial correlation normally uses the signed rank sums, so the current value should be described as a signed direction/proportion effect unless the code is revised to use the rank sums. This naming issue does not change the Wilcoxon p-value itself.
+The implementation uses the manuscript's signed-rank-sum rank-biserial
+correlation, $(W^+ - W^-)/(n(n+1)/2)$, and reports the median paired memory
+difference and its IQR in GB.
 
 ## Holm–Bonferroni correction for SOP 4
 
-SOP 4 has up to four planned tests:
+Each SOP 4 baseline comparison has its own two-test family:
 
 | Comparison | Inference time | GPU memory |
 |---|---|---|
 | TAHIMIK vs ByT5 | test 1 | test 2 |
 | TAHIMIK vs MrT5 | test 3 | test 4 |
 
-These four p-values form the **efficiency family**. They are corrected together, separately from SOP 3's eight accuracy p-values.
+Latency and GPU memory for ByT5 versus TAHIMIK form one family; latency and GPU
+memory for MrT5 versus TAHIMIK form the other. They are corrected separately.
 
-Holm–Bonferroni sorts the four raw p-values and compares the value at rank $k$ with:
+For each baseline comparison, Holm–Bonferroni sorts its two raw p-values and
+compares the value at rank $k$ with:
 
 $$
-\alpha_k=\frac{0.05}{4-k+1}
+\alpha_k=\frac{0.05}{2-k+1}
 $$
 
-The thresholds begin at 0.0125, 0.0167, 0.025, and 0.05. The smallest p-value faces the strictest threshold. The procedure stops declaring later ordered tests significant after the first failure. Report both raw and adjusted p-values.
+The thresholds are 0.025 then 0.05. The smallest p-value faces the strictest
+threshold. The procedure stops declaring later ordered tests significant after
+the first failure. Report both raw and adjusted p-values.
 
 ## SOP 4 decision workflow
 
@@ -241,7 +247,7 @@ Per-sentence latency + per-run memory observations
 Latency: paired bootstrap
 Memory: paired Wilcoxon signed-rank
        ↓
-Collect up to four efficiency p-values
+Correct the two p-values within each baseline comparison
        ↓
 Holm–Bonferroni correction within efficiency family
        ↓

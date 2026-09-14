@@ -24,15 +24,17 @@
 # =============================================================================
 
 import importlib
+import json
 import os
 import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -40,6 +42,12 @@ from pydantic import BaseModel, Field
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.data.dataset import NormalizationDataset
+from src.evaluation.efficiency import EfficiencyBenchmark
+from src.evaluation.metrics import NormalizationMetrics
+from src.evaluation.statistical_tests import StatisticalAnalysis
+from src.training.trainer import validate_checkpoint_architecture
 
 
 # ── Variant registry ────────────────────────────────────────────────────
@@ -57,14 +65,14 @@ VARIANTS: Dict[str, Dict[str, str]] = {
         "label": "MrT5",
         "config_module": "configs.mrt5_config",
         "config_class": "MrT5Config",
-        "model_module": "src.models.fixed_compression_byt5",
+        "model_module": "src.models.fixed_compression",
         "model_class": "FixedCompressionByT5",
     },
     "tahimik": {
         "label": "TAHIMIK",
         "config_module": "configs.tahimik_config",
         "config_class": "TAHIMIKConfig",
-        "model_module": "src.models.noise_adaptive_byt5",
+        "model_module": "src.models.noise_adaptive",
         "model_class": "NoiseAdaptiveByT5",
     },
 }
@@ -74,6 +82,8 @@ DEFAULT_MODEL = "tahimik"
 # Loaded on first use, cached for the process lifetime.
 _loaded: Dict[str, Tuple[Any, Any]] = {}
 device: Optional[torch.device] = None
+EVALUATION_JOBS: Dict[str, Dict[str, Any]] = {}
+JOB_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "dashboard-jobs"
 
 
 def load_config(name: str):
@@ -162,7 +172,19 @@ def get_model(name: str) -> Tuple[Any, Any]:
     model = getattr(module, entry["model_class"])(config)
 
     checkpoint = torch.load(path, map_location="cpu")
-    model.load_state_dict(checkpoint.get("model_state_dict", checkpoint))
+    try:
+        validate_checkpoint_architecture(
+            checkpoint,
+            model,
+            expected_model_name=config.model_name,
+        )
+        model.load_state_dict(checkpoint.get("model_state_dict", checkpoint))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            503,
+            f"Checkpoint for {entry['label']} is incompatible with "
+            f"'{config.model_name}': {exc}",
+        ) from exc
     model.to(device)
     model.eval()
 
@@ -269,6 +291,24 @@ class CompareBatchRequest(BaseModel):
 
 class CompareBatchResponse(BaseModel):
     results: List[CompareResponse]
+
+
+class EvaluationExample(BaseModel):
+    input: str = Field(..., min_length=1, max_length=2048)
+    reference: str = Field(..., min_length=1, max_length=2048)
+
+
+class EvaluateRequest(BaseModel):
+    examples: List[EvaluationExample] = Field(..., min_length=1, max_length=2000)
+    max_length: int = Field(512, ge=16, le=2048)
+    num_beams: int = Field(4, ge=1, le=10)
+
+
+class EvaluationJobResponse(BaseModel):
+    job_id: str
+    status: str
+    stage: str
+    total_examples: int
 
 
 # ── Inference ───────────────────────────────────────────────────────────
@@ -387,6 +427,62 @@ def require_all_variants_available() -> None:
         )
 
 
+def persist_evaluation_job(job: Dict[str, Any]) -> None:
+    JOB_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    (JOB_OUTPUT_DIR / f"{job['job_id']}.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
+
+
+def execute_evaluation_job(job_id: str) -> None:
+    """Run the complete labelled accuracy, profiling, and statistics workflow."""
+    job = EVALUATION_JOBS[job_id]
+    try:
+        job.update(status="running", stage="evaluation")
+        persist_evaluation_job(job)
+        inputs = [example["input"] for example in job["examples"]]
+        references = [example["reference"] for example in job["examples"]]
+        metrics = NormalizationMetrics()
+        outputs_by_model: Dict[str, List[str]] = {}
+        score_vectors: Dict[str, Dict[str, List[float]]] = {}
+        efficiency: Dict[str, Dict[str, Any]] = {}
+
+        for name in VARIANTS:
+            outputs = [run_model_with_telemetry(text, name, job["max_length"], job["num_beams"])[0] for text in inputs]
+            outputs_by_model[name] = outputs
+            score_vectors[name] = metrics.compute_per_sentence(outputs, references, inputs)
+            job["completed_examples"] = len(inputs)
+            persist_evaluation_job(job)
+
+        job["stage"] = "profiling"
+        persist_evaluation_job(job)
+        runtime_device = device or torch.device("cpu")
+        for name in VARIANTS:
+            tokenizer, model = get_model(name)
+            dataset = NormalizationDataset(inputs, references, tokenizer)
+            profile = EfficiencyBenchmark(model, tokenizer, runtime_device, num_beams=job["num_beams"]).benchmark(dataset, batch_size=1)
+            efficiency[name] = profile
+            score_vectors[name]["inference_time"] = profile["per_sentence_time_seconds"]
+
+        job["stage"] = "statistics"
+        persist_evaluation_job(job)
+        statistics = StatisticalAnalysis().run_full_comparison(
+            score_vectors,
+            {name: efficiency[name]["peak_gpu_memory_runs_mb"] for name in VARIANTS},
+        )
+        job["result"] = {
+            "examples": [
+                {"input": source, "reference": reference, "outputs": {name: outputs_by_model[name][index] for name in VARIANTS}, "scores": {name: {metric: score_vectors[name][metric][index] for metric in ("gleu_plus", "chrf", "err", "alpha_word_accuracy")} for name in VARIANTS}}
+                for index, (source, reference) in enumerate(zip(inputs, references))
+            ],
+            "metrics": {name: metrics.compute_all(outputs_by_model[name], references, inputs) for name in VARIANTS},
+            "efficiency": efficiency,
+            "statistics": statistics,
+        }
+        job.update(status="completed", stage="complete")
+    except Exception as exc:
+        job.update(status="failed", stage="failed", error=f"Evaluation failed: {exc}")
+    persist_evaluation_job(job)
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
@@ -495,6 +591,32 @@ def compare_batch(req: CompareBatchRequest):
             )
         comparisons.append(CompareResponse(input=text, results=results))
     return CompareBatchResponse(results=comparisons)
+
+
+@app.post("/evaluate", response_model=EvaluationJobResponse, status_code=202)
+def evaluate(req: EvaluateRequest, background_tasks: BackgroundTasks):
+    active = next((job for job in EVALUATION_JOBS.values() if job["status"] in {"queued", "running"}), None)
+    if active:
+        raise HTTPException(status_code=409, detail=f"Evaluation job '{active['job_id']}' is already active.")
+    require_all_variants_available()
+    job = {
+        "job_id": str(uuid.uuid4()), "status": "queued", "stage": "queued",
+        "total_examples": len(req.examples), "completed_examples": 0,
+        "examples": [example.model_dump() for example in req.examples],
+        "max_length": req.max_length, "num_beams": req.num_beams,
+    }
+    EVALUATION_JOBS[job["job_id"]] = job
+    persist_evaluation_job(job)
+    background_tasks.add_task(execute_evaluation_job, job["job_id"])
+    return EvaluationJobResponse(job_id=job["job_id"], status="queued", stage="queued", total_examples=job["total_examples"])
+
+
+@app.get("/evaluate/{job_id}")
+def evaluate_status(job_id: str):
+    job = EVALUATION_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Evaluation job '{job_id}' was not found.")
+    return job
 
 
 # ── Run directly ───────────────────────────────────────────────────────

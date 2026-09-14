@@ -4,8 +4,8 @@
 
 - [ ] T001 [US1] Add failing hand-computed GLEU+ fixtures for perfect unchanged-clean, corrected, copied-noise, empty, and n-gram-order cases in `tests/test_metrics_exact.py`.
 - [ ] T002 [US1] Correct source-aware GLEU+ weighting, penalty, and brevity behavior in `src/evaluation/metrics.py` until T001 passes.
-- [ ] T003 [US1] Add failing unequal-denominator corpus ERR and shared Unicode alpha-word tests in `tests/test_metrics_exact.py`.
-- [ ] T004 [US1] Implement corpus-total ERR and one shared word definition in `src/evaluation/metrics.py` until T003 passes.
+- [ ] T003 [US1] Add failing token-accuracy Leave-As-Is ERR fixtures, including unequal corpus denominators, case handling, and punctuation preservation, plus shared Unicode alpha-word tests in `tests/test_metrics_exact.py`.
+- [ ] T004 [US1] Implement corpus-total token-accuracy ERR and one shared word definition in `src/evaluation/metrics.py` until T003 passes.
 
 ## Phase 2 — Statistical inference
 

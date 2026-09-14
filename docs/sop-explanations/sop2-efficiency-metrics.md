@@ -220,7 +220,7 @@ Average repeated timings for each sentence
         ↓
 Average sentence means → avg_time_per_sentence
 Compute SD of run means → std_time_per_sentence
-Take maximum memory run → peak_gpu_memory_mb
+Compute mean/SD of peak-memory runs → peak_gpu_memory_mb / std_peak_gpu_memory_mb
         ↓
 Preserve per-sentence times and per-run memory for SOP 4
 ```

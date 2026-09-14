@@ -98,6 +98,7 @@ def validate_checkpoint_architecture(
     checkpoint: Dict[str, Any],
     model: nn.Module,
     allow_legacy: bool = False,
+    expected_model_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Validates that a checkpoint's architecture matches the target model's architecture.
@@ -126,6 +127,11 @@ def validate_checkpoint_architecture(
     expected_vocab = getattr(cfg, "vocab_size", None)
 
     mismatches = []
+    if expected_model_name is not None and arch.get("model_name") != expected_model_name:
+        mismatches.append(
+            "model_name mismatch: "
+            f"checkpoint has {arch.get('model_name')!r}, model requires {expected_model_name!r}"
+        )
     if expected_d_model is not None and arch.get("d_model") is not None:
         if arch["d_model"] != expected_d_model:
             mismatches.append(f"d_model mismatch: checkpoint has {arch['d_model']}, model expects {expected_d_model}")
@@ -435,7 +441,7 @@ class TAHIMIKTrainer:
             m = getattr(self.model, "model", self.model)
             cfg = getattr(m, "config", getattr(self.model, "config", None))
             arch = {
-                "model_name": getattr(self.config, "model_name", "google/byt5-base"),
+                "model_name": getattr(self.config, "model_name", None),
                 "d_model": getattr(cfg, "d_model", None),
                 "num_encoder_layers": getattr(cfg, "num_layers", getattr(cfg, "num_encoder_layers", None)),
                 "num_decoder_layers": getattr(cfg, "num_decoder_layers", None),
@@ -481,7 +487,12 @@ class TAHIMIKTrainer:
         if "model_state_dict" not in checkpoint:
             raise ValueError(f"Malformed checkpoint at {stage1_path}: missing 'model_state_dict'")
 
-        validate_checkpoint_architecture(checkpoint, self.model, allow_legacy=allow_legacy)
+        validate_checkpoint_architecture(
+            checkpoint,
+            self.model,
+            allow_legacy=allow_legacy,
+            expected_model_name=getattr(self.config, "model_name", None),
+        )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         fp = compute_model_fingerprint(self.model)
 
@@ -680,7 +691,12 @@ class TAHIMIKTrainer:
         checkpoint = torch.load(
             checkpoint_path, map_location=self.device
         )
-        validate_checkpoint_architecture(checkpoint, self.model, allow_legacy=allow_legacy)
+        validate_checkpoint_architecture(
+            checkpoint,
+            self.model,
+            allow_legacy=allow_legacy,
+            expected_model_name=getattr(self.config, "model_name", None),
+        )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         logger.info(
             f"Loaded checkpoint from {checkpoint_path} "

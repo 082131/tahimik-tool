@@ -1,14 +1,4 @@
-# =============================================================================
-# Configuration for the MrT5 baseline (fixed-rate compression).
-#
-# MrT5 applies one fixed deletion rate to every input, regardless of how
-# noisy the sentence is. This is the second baseline, demonstrating the
-# efficiency gain of compression but also its limitation when the deletion
-# rate cannot adapt to per-sentence noise density.
-#
-# Reference: Kallini et al. (2025), "MrT5: Dynamic Token Merging for
-#            Efficient Byte-Level Language Models" (ICLR 2025).
-# =============================================================================
+# Configuration for fixed-rate byte compression (MrT5).
 
 from dataclasses import dataclass
 from configs.base import BaseConfig
@@ -16,7 +6,7 @@ from configs.base import BaseConfig
 
 @dataclass
 class MrT5Config(BaseConfig):
-    """MrT5 with fixed-rate compression — the efficiency baseline."""
+    """MrT5 fixed-rate compression configuration."""
 
     variant_name: str = "mrt5_fixed"
 
@@ -27,7 +17,7 @@ class MrT5Config(BaseConfig):
     # MrT5 places the delete gate after an early encoder layer (layer 3
     # in the original paper). The layers before the gate produce
     # contextual representations; the gate then scores and removes bytes.
-    delete_gate_layer: int = 3
+    delete_gate_layer: int = 2
 
     # ── Fixed deletion target ───────────────────────────────────────────
     # A single deletion ratio applied to every input. MrT5's PI controller
@@ -37,7 +27,7 @@ class MrT5Config(BaseConfig):
     # ── Gate regularizer (Equation 3 in MrT5 paper) ────────────────────
     # The gate regularizer encourages deletion by penalizing gate outputs
     # that are close to 0 (keep) rather than close to k (delete).
-    gate_k: float = -30.0          # Large negative constant bounding the gate
+    gate_k: float = -10.0          # Stanford MrT5 sigmoid_mask_scale
 
     # ── Gumbel noise on the gate logits (MrT5 reference impl.) ──────────
     # The reference implementation adds Gumbel noise to the delete-gate

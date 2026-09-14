@@ -4,11 +4,16 @@
 
 import torch
 import torch.nn as nn
-from transformers import AutoTokenizer, T5ForConditionalGeneration
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from transformers.modeling_outputs import BaseModelOutput
 from typing import Dict, Optional
 
-from src.models.delete_gate import DeleteGate
+from src.models.delete_gate import (
+    DeleteGate,
+    disable_embedded_mrt5_gate,
+    get_embedded_mrt5_gate,
+    load_mrt5_pretrained_gate,
+)
 from src.models.encoder_layers import (
     run_encoder_layers,
     compress_position_bias,
@@ -27,9 +32,15 @@ class FixedCompressionByT5(nn.Module):
         super().__init__()
 
         self.config = config
-        self.model = T5ForConditionalGeneration.from_pretrained(
-            config.model_name
+        # Stanford publishes MrT5 as custom Transformers code.  A plain
+        # T5ForConditionalGeneration loader discards that implementation and
+        # therefore does not execute Stanford's delete gate.
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            config.model_name,
+            trust_remote_code=True,
         )
+        source_gate = get_embedded_mrt5_gate(self.model)
+        disable_embedded_mrt5_gate(self.model)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
         # Gate placement: after this encoder layer
@@ -43,6 +54,14 @@ class FixedCompressionByT5(nn.Module):
             noise_adaptive=False,
             use_gumbel_noise=getattr(config, "use_gumbel_noise", True),
         )
+        if not load_mrt5_pretrained_gate(
+            self.delete_gate,
+            config.model_name,
+            source_gate=source_gate,
+        ):
+            raise RuntimeError(
+                "Could not load the Stanford MrT5 delete gate; refusing to use a random gate."
+            )
 
         # Fixed deletion target for the rate loss
         self.fixed_deletion_target = config.fixed_deletion_target

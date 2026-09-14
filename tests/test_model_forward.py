@@ -22,8 +22,8 @@ from transformers import T5Config, T5ForConditionalGeneration
 
 from configs.mrt5_config import MrT5Config
 from configs.tahimik_config import TAHIMIKConfig
-import src.models.fixed_compression_byt5 as mrt5_module
-import src.models.noise_adaptive_byt5 as tahimik_module
+import src.models.fixed_compression as mrt5_module
+import src.models.noise_adaptive as tahimik_module
 import src.models.byt5_baseline as baseline_module
 from configs.byt5_config import ByT5Config
 from src.training.losses import TAHIMIKLoss
@@ -64,12 +64,18 @@ def _tiny_t5():
 @pytest.fixture
 def patched(monkeypatch):
     """Swap the pretrained loads for a tiny local model in both variants."""
-    for module in (mrt5_module, tahimik_module, baseline_module):
+    for module in (mrt5_module, tahimik_module):
         monkeypatch.setattr(
-            module, "T5ForConditionalGeneration",
+            module, "AutoModelForSeq2SeqLM",
             type("_Stub", (), {"from_pretrained": staticmethod(lambda *a, **k: _tiny_t5())}),
         )
         monkeypatch.setattr(module, "AutoTokenizer", _StubTokenizer)
+        monkeypatch.setattr(module, "load_mrt5_pretrained_gate", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        baseline_module, "T5ForConditionalGeneration",
+        type("_Stub", (), {"from_pretrained": staticmethod(lambda *a, **k: _tiny_t5())}),
+    )
+    monkeypatch.setattr(baseline_module, "AutoTokenizer", _StubTokenizer)
 
 
 @pytest.fixture
@@ -373,10 +379,11 @@ def test_compression_modules_follow_backbone_shape(variant, d_model, num_layers,
     )
     for mod in (mrt5_module, tahimik_module):
         monkeypatch.setattr(
-            mod, "T5ForConditionalGeneration",
+            mod, "AutoModelForSeq2SeqLM",
             type("_Stub", (), {"from_pretrained": staticmethod(t5_factory)}),
         )
         monkeypatch.setattr(mod, "AutoTokenizer", _StubTokenizer)
+        monkeypatch.setattr(mod, "load_mrt5_pretrained_gate", lambda *_args, **_kwargs: True)
 
     if variant == "mrt5":
         model = mrt5_module.FixedCompressionByT5(MrT5Config())
@@ -398,4 +405,3 @@ def test_compression_modules_follow_backbone_shape(variant, d_model, num_layers,
         noise_level=noise_level,
     )
     assert "loss" in out and torch.isfinite(out["loss"])
-

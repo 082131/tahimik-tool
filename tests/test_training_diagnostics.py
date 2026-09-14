@@ -4,7 +4,7 @@ import torch.nn as nn
 from transformers import T5Config, T5ForConditionalGeneration
 
 from configs.tahimik_config import TAHIMIKConfig
-import src.models.noise_adaptive_byt5 as tahimik_module
+import src.models.noise_adaptive as tahimik_module
 from src.models.delete_gate import DeleteGate
 from src.training.trainer import Trainer, compute_noise_band_diagnostics
 
@@ -36,10 +36,11 @@ class _StubTokenizer:
 @pytest.fixture
 def patched(monkeypatch):
     monkeypatch.setattr(
-        tahimik_module, "T5ForConditionalGeneration",
+        tahimik_module, "AutoModelForSeq2SeqLM",
         type("_Stub", (), {"from_pretrained": staticmethod(lambda *a, **k: _tiny_t5())}),
     )
     monkeypatch.setattr(tahimik_module, "AutoTokenizer", _StubTokenizer)
+    monkeypatch.setattr(tahimik_module, "load_mrt5_pretrained_gate", lambda *_args, **_kwargs: True)
 
 
 def test_tahimik_forward_emits_adaptive_diagnostics(patched):
@@ -120,5 +121,3 @@ def test_legacy_checkpoint_loading_migrates_cn_and_rejects_negative():
     invalid_state["cn"] = torch.tensor(-0.5)
     with pytest.raises(ValueError, match="(?i)inverted adaptivity"):
         gate.load_state_dict(invalid_state)
-
-

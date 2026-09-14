@@ -1,24 +1,4 @@
-# =============================================================================
-# Learned Noise Estimator — TAHIMIK's Sentence-Level Noise Scorer
-#
-# The noise estimator is a small feed-forward network that reads the
-# contextual hidden states [h] from the early encoder blocks and predicts
-# a single noise score n ∈ [0, 1] for the entire sentence.
-#
-# Architecture (from the manuscript, Noise-Adaptive Deletion section):
-#   1. Mean-pool all non-padding hidden states into one sentence vector
-#   2. Pass through a two-layer feed-forward network
-#   3. Apply sigmoid to produce the noise score
-#
-# The noise score n controls the delete gate's compression behavior:
-#   - n ≈ 0 (clean input)  → aggressive compression allowed
-#   - n ≈ 1 (noisy input)  → compression is conservative
-#
-# Training signal: L_NE compares predicted n against n* (the byte-level
-# edit distance ratio computed during data preparation). This is the ONLY
-# loss term that trains the noise estimator — n is detached everywhere
-# else so the gate's gradients do not leak into the estimator.
-# =============================================================================
+# 2-layer MLP that pools encoder hidden states and predicts sentence noise level (0.0 to 1.0).
 
 import torch
 import torch.nn as nn
@@ -26,10 +6,7 @@ import torch.nn as nn
 
 class NoiseEstimator(nn.Module):
     """
-    Predicts a sentence-level noise score from encoder hidden states.
-
-    This module is the first sub-component of the Noise-Adaptive Deletion
-    Module. Its output conditions the delete gate's behavior.
+    Predicts sentence-level noise scores from early encoder hidden states.
 
     Args:
         hidden_dim: Dimensionality of the encoder hidden states (d_model).

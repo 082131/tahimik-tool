@@ -259,7 +259,8 @@ def test_noisier_sentences_are_compressed_less(gate, batch):
 
 # ── Techniques adopted from the MrT5 reference implementation ─────────────
 #
-# Both of these come from jkallini/mrt5 (Apache 2.0, see ATTRIBUTIONS.md).
+# Both of these come from jkallini/mrt5 (Apache 2.0, see
+# docs/project/attributions.md).
 # They were added after the fact rather than test-first, which inverts
 # Constitution Principle IV — recorded rather than hidden.
 
@@ -298,6 +299,26 @@ def test_gumbel_noise_can_be_disabled(batch):
     a = gate(hidden, mask)[0]
     b = gate(hidden, mask)[0]
     assert torch.allclose(a, b), "noise applied despite use_gumbel_noise=False"
+
+
+def test_gate_uses_stanford_scaled_sigmoid_direction():
+    """MrT5's gate is scale * sigmoid(-logit), not scale * sigmoid(logit)."""
+    gate = DeleteGate(hidden_dim=DIM, k=-10.0, noise_adaptive=False, use_gumbel_noise=False)
+    with torch.no_grad():
+        gate.gate_linear.weight.zero_()
+        gate.gate_linear.bias.fill_(2.0)
+
+    hidden = torch.zeros(1, 3, DIM)
+    mask = torch.ones(1, 3)
+    gate_values, _, _, _ = gate(hidden, mask)
+
+    expected = -10.0 * torch.sigmoid(torch.tensor(-2.0))
+    assert torch.allclose(gate_values.squeeze(-1), torch.full((1, 3), expected))
+
+
+def test_gate_uses_stanford_t5_rms_layer_norm_without_bias():
+    gate = DeleteGate(hidden_dim=DIM, noise_adaptive=False)
+    assert getattr(gate.layer_norm, "bias", None) is None
 
 
 def test_hard_deletion_keeps_exactly_the_marked_positions(batch):

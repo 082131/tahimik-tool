@@ -65,3 +65,13 @@ def test_efficiency_runs_with_variable_length_dataset(benchmark_setup):
     assert len(results["per_sentence_time_seconds"]) == len(dataset)
     assert results["avg_time_per_sentence"] >= 0.0
 
+
+def test_cpu_benchmark_marks_all_peak_memory_summaries_unavailable(benchmark_setup):
+    benchmark, dataset = benchmark_setup
+
+    results = benchmark.benchmark(dataset, batch_size=1)
+
+    assert results["gpu_memory_available"] is False
+    assert results["mean_peak_gpu_memory_mb"] is None
+    assert results["std_peak_gpu_memory_mb"] is None
+    assert results["max_peak_gpu_memory_mb"] is None
