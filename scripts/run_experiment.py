@@ -40,9 +40,8 @@ from src.models.noise_adaptive import NoiseAdaptiveByT5
 from src.training.losses import TAHIMIKLoss
 from src.training.trainer import TAHIMIKTrainer
 
-from src.data.preprocessing import DataPipeline
+from src.data.preprocessing import DataPipeline, prepare_paired_examples
 from src.data.dataset import NormalizationDataset, collate_fn
-from src.data.noise_label import compute_noise_level
 from src.evaluation.metrics import NormalizationMetrics
 from src.evaluation.efficiency import EfficiencyBenchmark
 from src.evaluation.statistical_tests import StatisticalAnalysis
@@ -106,11 +105,12 @@ def main():
 
 
     gold_noisy, gold_clean = pipeline.load_gold_standard(args.gold_data)
-    gold_noise_levels = [
-        compute_noise_level(n, c) for n, c in zip(gold_noisy, gold_clean)
-    ]
+    gold_prepared = prepare_paired_examples(
+        gold_noisy, gold_clean, tokenizer,
+        base_config.max_input_length, base_config.max_target_length,
+    )
     gold_splits = pipeline.split_data(
-        gold_noisy, gold_clean, gold_noise_levels,
+        gold_prepared.noisy_texts, gold_prepared.clean_texts, gold_prepared.noise_levels,
         train_ratio=base_config.gold_train_ratio,
         val_ratio=base_config.gold_val_ratio,
         test_ratio=base_config.gold_test_ratio,
@@ -146,7 +146,8 @@ def main():
     if args.clean_corpus:
         clean_sentences = pipeline.load_clean_corpus(args.clean_corpus)
         syn_noisy, syn_clean, syn_noise = pipeline.generate_synthetic_pairs(
-            clean_sentences, target_size=args.synthetic_size
+            clean_sentences, tokenizer, base_config.max_input_length,
+            base_config.max_target_length, target_size=args.synthetic_size,
         )
         syn_splits = pipeline.split_data(
             syn_noisy, syn_clean, syn_noise,
