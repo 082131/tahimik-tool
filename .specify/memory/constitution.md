@@ -160,11 +160,11 @@ run traceable to a commit. CI runs on CPU and cannot produce these.
 
 **Code that contradicts the manuscript.** Wherever a configuration value
 disagrees with what the manuscript states, the code carries a comment at that
-line saying so and naming which is authoritative. `configs/base.py` pins
-`google/byt5-small` while the manuscript specifies `byt5-base` for the
-experiments; that is the known instance today, and the rule exists to catch
-the ones not yet found. No reported result may come from a run whose config
-contradicts the manuscript unless that divergence is stated alongside it.
+line saying so and naming which is authoritative. AD-003 and Specs 017–019 are
+the current model-source authority: `google/byt5-small` for ByT5 and
+`stanfordnlp/mrt5-small` for MrT5 and TAHIMIK. No reported result may come from
+a run whose config contradicts the governing decision or manuscript unless
+that divergence is stated alongside it.
 
 ### IV. Test-First & CI Gate
 

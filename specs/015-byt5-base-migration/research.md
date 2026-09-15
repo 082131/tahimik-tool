@@ -1,5 +1,8 @@
 # Research: ByT5 Base Migration
 
+> **Status:** Superseded by `specs/017-small-model-migration/`. The active study
+> configuration uses designated Small sources.
+
 Background investigation into ByT5-Base hardware feasibility, layer 3 deletion gate retention, and comparative integrity.
 
 ---

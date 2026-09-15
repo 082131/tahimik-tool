@@ -2,7 +2,12 @@
 
 **Feature Branch**: `feat/015-byt5-base-migration`
 **Created**: 2026-09-08
-**Status**: Implemented
+**Status**: Superseded on 2026-09-15 by [Spec 017](../017-small-model-migration/spec.md)
+
+> This specification records the former Base configuration. It is not the
+> authority for current model selection, checkpoint eligibility, batching, or
+> reporting. Use Spec 017 for the active Small configuration, Spec 018 for the
+> MrT5 baseline, and Spec 019 for TAHIMIK's starting point.
 **Input**: Migrate the controlled ByT5 baseline, MrT5-style fixed compression, and TAHIMIK noise-adaptive experiment from `google/byt5-small` to the manuscript-required `google/byt5-base` backbone without introducing tokenizer, checkpoint, memory, or comparison confounds.
 
 ---

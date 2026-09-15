@@ -1,5 +1,9 @@
 # Feature Specification: Noise-Adaptive ByT5 (TAHIMIK)
 
+> **Current model-source authority:** `specs/019-mrt5-backed-tahimik/spec.md`.
+> TAHIMIK starts from `stanfordnlp/mrt5-small` and its pretrained gate; older
+> source, layer-value, and gate-scale clauses below are superseded.
+
 **Feature Branch**: `feat/005-noise-adaptive-byt5`
 
 **Created**: 2026-08-27

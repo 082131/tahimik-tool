@@ -1,5 +1,8 @@
 # Quickstart: ByT5 Base Migration
 
+> **Status:** Do not run as a current configuration check. Use
+> `specs/017-small-model-migration/quickstart.md`.
+
 Commands to verify and inspect the ByT5-Base configuration and run hardware preflight.
 
 ---

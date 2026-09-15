@@ -1,5 +1,8 @@
 # Phase 1 Data Model: Fixed-Rate Compression
 
+> **Current parameter/source authority:**
+> `specs/018-huggingface-mrt5-baseline/data-model.md`.
+
 No persistent data entity. The entities here are the tensors the gate produces
 and the config values that govern it.
 

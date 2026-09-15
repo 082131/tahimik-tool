@@ -12,17 +12,18 @@
 
 ## Architecture and Model Backbone
 
-- **Backbone and Model Variants**: Three unambiguous conditions are compared under identical control variables:
-  1. `ByT5-base` (uncompressed ceiling)
-  2. `ByT5-base + fixed-rate deletion` (MrT5-style fixed delete gate)
-  3. `TAHIMIK (ByT5-base + noise-adaptive deletion)` (noise-adaptive delete gate)
-  All three backbones are initialized independently from Google's pretrained `google/byt5-base` checkpoint. Gate and estimator modules are randomly initialized. No released Stanford MrT5 checkpoint (`stanfordnlp/mrt5-small` or non-existent Base) is used.
+- **Backbone and Model Variants**: Three unambiguous Small-model conditions are compared under shared data, training, and evaluation controls:
+  1. `google/byt5-small` (uncompressed ceiling)
+  2. `stanfordnlp/mrt5-small` (fixed-rate deletion baseline)
+  3. `TAHIMIK` initialized from `stanfordnlp/mrt5-small` (noise-adaptive deletion)
+  The compressed variants use Stanford's custom model code and pretrained gate.
+  TAHIMIK adds the noise estimator, per-example target, and adaptive gate shift.
 - **Delete Gate Layer**: Layer 3 is retained as the absolute delete gate location for both compressed variants for manuscript fidelity.
 - **Position Bias**: Relative position bias is extracted from layer index 1 and threaded across compression, preserving learned position embeddings.
 - **Gating Parameterization**: Adaptive noise coefficient $c_n$ uses smooth softplus parameterization ($c_n = \text{softplus}(\text{raw\_cn}) \ge 0.0$) ensuring stable monotonic noise-adaptive compression.
 - **Dynamic Padding**: Batches are padded dynamically to batch-max length via `NormalizationCollator` with a 1,024-byte truncation ceiling rather than static 1,024-byte zero-padding.
-- **Batching & Gradient Accumulation**: Preserves manuscript effective batch sizes (Stage 1: 16, Stage 2: 8) using physical batch size 2 with 8 and 4 gradient accumulation steps respectively.
-- **Two-Stage Checkpoint Handoff**: Stage 2 training deterministically restores the best Stage 1 checkpoint (`best_stage1.pt`) evaluated on validation loss before building the Stage 2 optimizer. Architecture validation enforces that Small or mismatched checkpoints cannot be loaded.
+- **Batching & Gradient Accumulation**: Preserves effective batch sizes (Stage 1: 16, Stage 2: 8) using physical batch size 4 with 4 and 2 gradient accumulation steps respectively.
+- **Two-Stage Checkpoint Handoff**: Stage 2 training deterministically restores the best Stage 1 checkpoint (`best_stage1.pt`) evaluated on validation loss before building the Stage 2 optimizer. Architecture validation rejects Base checkpoints and rejects a different pretrained source even when dimensions match.
 
 ## Reproducibility and data controls
 

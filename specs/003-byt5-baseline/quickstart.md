@@ -56,15 +56,15 @@ from configs.mrt5_config import MrT5Config
 from configs.tahimik_config import TAHIMIKConfig
 names = {c().variant_name: c().model_name for c in (ByT5Config, MrT5Config, TAHIMIKConfig)}
 print(names)
-assert len(set(names.values())) == 1, 'variants disagree on model_name'
-print('all three variants read the same model_name')
+assert names['byt5_baseline'] == 'google/byt5-small'
+assert names['mrt5_fixed'] == 'stanfordnlp/mrt5-small'
+assert names['tahimik_noise_adaptive'] == 'stanfordnlp/mrt5-small'
+print('all variants use their designated Small source')
 "
 ```
 
-Expect all three to print `google/byt5-small` today. The manuscript specifies
-`byt5-base` — the point of this check is that they **agree with each other**,
-which is what makes the comparison fair. Whether they agree with the manuscript
-is `specs/FINDINGS.md` item 4.
+Expect the native baseline to print `google/byt5-small` and the two compressed
+variants to print `stanfordnlp/mrt5-small`, as specified by Specs 017–019.
 
 ## What this does not cover
 

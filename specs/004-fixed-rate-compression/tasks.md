@@ -1,5 +1,9 @@
 # Tasks: Fixed-Rate Compression (MrT5 Baseline)
 
+> **Current implementation tasks:** See
+> `specs/018-huggingface-mrt5-baseline/tasks.md`. Any unchecked task below that
+> prohibits the released checkpoint or requests a from-scratch gate is obsolete.
+
 **Input**: Design documents from `/specs/004-fixed-rate-compression/`
 
 **Prerequisites**: spec.md, plan.md, research.md, data-model.md, quickstart.md

@@ -1,5 +1,11 @@
 # Feature Specification: Fixed-Rate Compression (MrT5 Baseline)
 
+> **Current model-source and gate authority:**
+> `specs/018-huggingface-mrt5-baseline/spec.md`. The active baseline loads
+> `stanfordnlp/mrt5-small`, transfers its pretrained gate into the wrapper,
+> uses configuration index 2 (the third encoder block), and uses `k=-10.0`.
+> Older source, layer-value, and gate-scale clauses below are superseded.
+
 **Feature Branch**: `feat/004-fixed-rate-compression`
 
 **Created**: 2026-08-27

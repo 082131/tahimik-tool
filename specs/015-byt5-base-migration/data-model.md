@@ -1,5 +1,7 @@
 # Data Model: ByT5 Base Migration
 
+> **Status:** Superseded by `specs/017-small-model-migration/data-model.md`.
+
 Defines the schemas and entity relationships for configuration, checkpoint architecture fingerprints, and preflight outputs.
 
 ---

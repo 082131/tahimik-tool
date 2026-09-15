@@ -1,5 +1,8 @@
 # Plan: ByT5 Base Migration
 
+> **Status:** Superseded by `specs/017-small-model-migration/`. This plan is an
+> architecture-history record and must not be executed against the current system.
+
 **Component**: Backbone and Training Infrastructure
 **Branch**: `feat/015-byt5-base-migration`
 **Spec**: [spec.md](spec.md)
