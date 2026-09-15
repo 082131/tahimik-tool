@@ -1,5 +1,8 @@
 # Tasks: ByT5 Base Migration
 
+> **Status:** Completed historical work, superseded by Spec 017. These tasks are
+> not current implementation instructions.
+
 **Input**: Design documents from `/specs/015-byt5-base-migration/`
 **Prerequisites**: [spec.md](spec.md), [plan.md](plan.md), [data-model.md](data-model.md), [research.md](research.md), [quickstart.md](quickstart.md)
 

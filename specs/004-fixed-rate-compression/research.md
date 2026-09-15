@@ -1,5 +1,9 @@
 # Phase 0 Research: Fixed-Rate Compression (MrT5)
 
+> **Current decision:** `specs/018-huggingface-mrt5-baseline/` governs model
+> loading and gate initialization. The released `stanfordnlp/mrt5-small`
+> checkpoint and its pretrained gate are used by the active system.
+
 Grilling answers with their sources. One item is left deliberately unresolved
 because it is a manuscript question, not a code question.
 

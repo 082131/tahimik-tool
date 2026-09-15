@@ -66,22 +66,17 @@ size. The test itself is correct; the reporting is incomplete.
 
 ## Fix before running real experiments
  
-### 4. The code runs `byt5-small`; the manuscript specifies `byt5-base` [RESOLVED 2026-09-08]
+### 4. Model-size and model-source selection [RESOLVED 2026-09-15]
 
-**Where**: `configs/base.py:25`, inherited by all three variants
-**Specs**: [003](003-byt5-baseline/spec.md), [004](004-fixed-rate-compression/spec.md), [005](005-noise-adaptive-byt5/spec.md) F1
-**Status**: **RESOLVED** on 2026-09-08 via AD-002 and the ByT5-Base Migration Plan.
+**Where**: `configs/base.py`, `configs/byt5_config.py`
+**Specs**: [017](017-small-model-migration/spec.md), [018](018-huggingface-mrt5-baseline/spec.md), [019](019-mrt5-backed-tahimik/spec.md)
+**Status**: **RESOLVED** by AD-003.
 
-Manuscript: *"The base variant of ByT5 will be used, and both MrT5 and the
-proposed noise-adaptive model will adopt the base variant."*
-
-Resolution:
-1. `BaseConfig.model_name` is set to `"google/byt5-base"` as the single authority across all variants and tokenizer loaders.
-2. `scripts/run_experiment.py` uses `base_config.model_name` rather than any hardcoded string.
-3. All compression modules (delete gate, noise estimator) dynamically derive shapes from `config.d_model` (1,536 for Base).
-4. Physical batch sizes (2) are paired with gradient accumulation steps (8 for Stage 1, 4 for Stage 2) to preserve effective batches of 16 and 8.
-5. Checkpoint architecture validation explicitly rejects Small (`d_model=1472`) checkpoints from being loaded into Base models.
-6. Checkpoint provenance and hardware preflight script (`scripts/preflight_base.py`) verify model identity before training.
+The current controlled comparison uses `google/byt5-small` for the
+uncompressed baseline and `stanfordnlp/mrt5-small` for both compressed
+variants. Checkpoints persist and validate both the exact source identifier
+and the Small architecture fingerprint. Base checkpoints and cross-source
+Small checkpoints are rejected. Effective batches remain 16 and 8.
 
 ### 5. Runs are seeded but not bit-reproducible
 
@@ -125,7 +120,12 @@ Everything else either already works or is visibly incomplete.
 
 ---
 
-## Decided, pending implementation
+## Historical pre-integration analysis
+
+> **Superseded by AD-003 and Specs 018–019.** The active system loads the
+> released `stanfordnlp/mrt5-small` model and pretrained gate for both
+> compressed variants. The material below preserves the earlier analysis and
+> is not a current implementation instruction.
 
 **[AD-001](DECISIONS.md)** — the delete gate will be replaced with Stanford's
 official MrT5 implementation, trained from `byt5-small` on this study's data.
@@ -216,11 +216,11 @@ majority are already satisfied. The findings above are the exceptions.
 
 ---
 
-## Resolved Remediations (2026-09-08 Implementation)
+## Resolved Remediations
 
 The manuscript alignment remediation completed and verified the following key fixes:
 
-1. **Authoritative ByT5-Base Backbone (Finding 4)**: `configs/base.py` and `scripts/run_experiment.py` configure `google/byt5-base` across all three conditions and load tokenizers dynamically.
+1. **Designated Small Sources (Finding 4)**: ByT5 uses `google/byt5-small`; MrT5 and TAHIMIK use `stanfordnlp/mrt5-small`. Source and architecture metadata prevent incompatible checkpoint loading.
 2. **Non-Negative Adaptive Coefficient (Finding 7)**: `src/models/delete_gate.py` parameterizes $c_n$ via `raw_cn` and `F.softplus(raw_cn) >= 0.0`, eliminating gate-inversion risk. Legacy checkpoint loading automatically adapts scalar `cn`.
 3. **EMA Gradient Isolation**: `navg` update is executed under `torch.no_grad()`.
 4. **Preserved Relative Position Bias**: Layer index 1 relative position bias is preserved and gathered via `compress_position_bias` in `src/models/encoder_layers.py`.

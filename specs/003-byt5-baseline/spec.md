@@ -1,5 +1,9 @@
 # Feature Specification: ByT5 Baseline (No Compression)
 
+> **Current model-source authority:** `specs/017-small-model-migration/spec.md`.
+> The active uncompressed baseline is `google/byt5-small`; clauses below that
+> require a shared model identifier across compressed variants are superseded.
+
 **Feature Branch**: `feat/003-byt5-baseline`
 
 **Created**: 2026-08-27

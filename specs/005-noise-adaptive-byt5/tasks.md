@@ -1,5 +1,9 @@
 # Tasks: Noise-Adaptive ByT5 (TAHIMIK)
 
+> **Current baseline-integration tasks:** See
+> `specs/019-mrt5-backed-tahimik/tasks.md`. Earlier unchecked source-migration
+> tasks are not current instructions.
+
 **Input**: Design documents from `/specs/005-noise-adaptive-byt5/`
 
 **Prerequisites**: spec.md, plan.md, research.md, data-model.md, quickstart.md

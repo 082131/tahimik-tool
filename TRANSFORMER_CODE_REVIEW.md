@@ -6,13 +6,19 @@
 
 The uncompressed ByT5 wrapper is a thin and generally correct use of the Hugging Face model. The two compressed variants have a material training/inference inconsistency: their custom training forward path omits the backbone's conditional decoder-output scaling, whereas generation uses the backbone's normal forward path. This can make both compression conditions learn from a different logit distribution than the one used for reported predictions, so the study is **not ready** for thesis experiments until corrected and regression-tested.
 
-The data, scheduler, padding, gradient accumulation, hard-deletion, CUDA synchronization, and current statistical-test paths are largely thoughtfully implemented. Main remaining validity risks are independent re-splitting at each entry point, truncation after noise labels are computed, and the fact that the soft surrogate rate trained by the gate is not the hard deletion rate measured at inference. Reproducibility is incomplete because production entry points do not enable the repository's required deterministic mode.
+The data, scheduler, paired-length preparation, padding, gradient accumulation,
+hard-deletion, CUDA synchronization, and current statistical-test paths are
+largely thoughtfully implemented. Main remaining validity risks are independent
+re-splitting at each entry point and the fact that the soft surrogate rate
+trained by the gate is not the hard deletion rate measured at inference.
+Reproducibility is incomplete because most production entry points do not
+enable the repository's required deterministic mode.
 
 ## 2. Model-by-model summary
 
 | Model | Intended / implemented architecture | Status |
 |---|---|---|
-| ByT5 baseline | `google/byt5-small` loaded as `T5ForConditionalGeneration`; full native encoder/decoder; no gate; deletion rate is zero. | Architecture, teacher forcing, padding, and beam generation are sound. Config and README consistently select *small*, but the older retrofit specs and constitution still say *base*, so the documented study contract must be reconciled. |
+| ByT5 baseline | `google/byt5-small` loaded as `T5ForConditionalGeneration`; full native encoder/decoder; no gate; deletion rate is zero. | Architecture, teacher forcing, padding, and beam generation are sound. Spec 017 and AD-003 establish Small as the active source. |
 | MrT5 fixed | Stanford remote MrT5 backbone with embedded gate disabled; wrapper inserts a copied local gate after encoder block 2, applies soft attention bias in training and hard gather-based pruning in eval/generation. | Custom masking and position-bias propagation are internally consistent. The manual decoder logit path is wrong when `config.scale_decoder_outputs` is enabled; hard-rate behavior is not directly optimized. |
 | TAHIMIK adaptive | MrT5 path plus an MLP on pre-gate states, EMA-centred positive score shift, per-example rate target, and detached gate inputs. | The intended estimator lifecycle and gradient isolation are correctly wired. It inherits the compressed-decoder mismatch and hard-rate calibration concern. |
 
@@ -37,20 +43,18 @@ The data, scheduler, padding, gradient accumulation, hard-deletion, CUDA synchro
 
 ### P1 — High
 
-#### H1. Noise labels are calculated before independent input/target truncation
+#### H1. Paired length and noise-label consistency — RESOLVED
 
-**Affected models:** All models for sequence/target integrity; TAHIMIK directly for `L_NE`  
-**Affected code:** `src/data/dataset.py:48-95`; `scripts/train.py:147-175`; `scripts/evaluate.py:84-103`
+**Resolution:** `specs/023-paired-length-policy/` defines and implements one
+paired preparation boundary. `prepare_paired_examples` retains complete aligned
+word groups within both tokenizer limits, calculates `n*` from the retained
+strings, and runs before splitting in the training, evaluation, benchmark, and
+full-experiment entry points. `NormalizationDataset` rejects an unprepared
+overlength pair instead of silently truncating it.
 
-**Problem and evidence.** Scripts compute `n*` from complete strings, then `NormalizationDataset.__getitem__` independently truncates noisy input and clean target to their separate maximum lengths. Therefore a long pair can be trained/evaluated as truncated byte sequences while TAHIMIK receives an estimator target calculated from content the model never sees; separate truncation can also leave an incomplete normalization pair.
-
-**Impact on thesis.** This is a direct supervision error for TAHIMIK and can alter CE, accuracy, and cross-model fairness for overlength gold examples. It also makes the reported maximum-length policy hard to defend.
-
-**Recommended fix.** Decide and document one policy: reject overlength gold pairs with an auditable count, or deterministically pre-truncate/segment pairs before computing noise labels and before every split. Do not silently tokenize away differing suffixes.
-
-**Fix prompt.**
-
-> Make sequence-length handling consistent in `src/data/dataset.py`, `src/data/preprocessing.py`, and the train/evaluate/experiment entry points. Current `n*` is calculated from full noisy/clean strings, but `NormalizationDataset` later truncates input and target independently at `max_input_length` and `max_target_length`. Implement a single documented policy before noise-label computation and splitting: either reject overlength gold pairs with a logged/auditable reason, or deterministically transform pairs into valid aligned examples. The policy must apply identically to train, validation, test, and all variants; it must not silently retain an `n*` calculated from discarded text. Add tests for a long pair, including the resulting label and dataset length, and verify no train/test leakage is introduced.
+**Verification:** `tests/test_paired_length_policy.py` covers overflowing aligned
+groups, split/merge groups, exact post-policy labels, exclusion/audit behavior,
+dataset rejection, pre-split preparation, and disjoint split membership.
 
 #### H2. The rate loss trains a soft probability surrogate but reports a different hard threshold rate
 
@@ -116,27 +120,32 @@ The data, scheduler, padding, gradient accumulation, hard-deletion, CUDA synchro
 
 ### P3 — Low
 
-#### L1. Active configuration and several retrofit specs describe different backbone decisions
+#### L1. Active configuration and several retrofit specs describe different backbone decisions — RESOLVED
 
 **Affected models:** All  
 **Affected code:** `configs/base.py:25`, `README.md`, `specs/003-byt5-baseline/spec.md`, `specs/004-fixed-rate-compression/spec.md`, constitution references
 
-**Problem and evidence.** Active configs and README specify Small checkpoints, while older retrofit specifications/constitution passages still state the manuscript requires Base. `specs/FINDINGS.md` marks this historical remediation as resolved, but the checked-in current config is Small.
+**Resolution.** Specs 017–019 record the active designated Small sources and
+the released MrT5 initialization. AD-003 is the current decision. Specs 003–005
+point to the current source authorities, and Spec 015 is explicitly superseded.
 
-**Impact on thesis.** This is documentation/provenance ambiguity rather than an execution defect, but it could make the experimental setup indefensible unless the authoritative decision is explicit.
+**Impact on thesis.** The current source decision is explicit and traceable.
 
-**Recommended fix.** Reconcile the manuscript, constitution, README, specs, and current configs through an explicit recorded decision; do not silently change model size.
+**Verification.** Configuration tests assert `google/byt5-small` for ByT5 and
+`stanfordnlp/mrt5-small` for MrT5/TAHIMIK; checkpoint tests reject Base and
+same-shape cross-source checkpoints.
 
 **Fix prompt.**
 
-> Reconcile model-size documentation without changing any model code or checkpoint behavior. The active configs and README use ByT5/MrT5 Small, but retrofit specs and the constitution include stale text saying the thesis requires Base. Create or update the project’s explicit decision record, identify the authoritative study configuration, and update all stale references consistently. Include the exact checkpoint IDs, parameter-count implications, and whether prior runs remain eligible. Add a documentation check or test that prevents config/spec drift.
+> Resolved by Specs 017–019 and AD-003. No model code or checkpoint behavior was
+> changed by the documentation reconciliation.
 
 ## 4. Cross-model consistency findings
 
 | Area | ByT5 | MrT5 fixed | TAHIMIK | Consistency issue |
 |---|---|---|---|---|
 | Architecture | Native full T5 | Manual split encoder + local gate | MrT5 path + estimator | Intentional compression differences; compressed manual decoder needs native scaling parity. |
-| Input processing | Dynamic tokenizer/collator | Same | Same | Same policy, but labels predate potential truncation. |
+| Input processing | Paired preparation, then dynamic tokenizer/collator | Same | Same | Spec 023 computes labels after complete-group length preparation and before splitting. |
 | Attention/padding | Native mask | Additive gate bias; hard compressed mask | Same | Correctly masks padding in gate metrics. |
 | Training | Native HF CE | Manual CE, rate + commitment loss | Manual CE, rate + commitment + MSE | Compressed CE scaling differs from baseline/native inference. |
 | Inference/decoding | Beam generation | Hard prune then native generation | Same plus estimator | Same beams/max length; hard rate is factual telemetry. |
@@ -157,7 +166,7 @@ The `NormalizationCollator`, `EfficiencyBenchmark`, shared `TAHIMIKLoss`, and `r
 - [x] **PASS** — No evaluation-side fallback substitutes a model output.
 - [x] **PASS** — CUDA timing is synchronized and warmups are discarded.
 - [x] **PASS** — Peak CUDA allocation is reset per timed run; CPU explicitly reports memory unavailable.
-- [~] **NEEDS VERIFICATION** — Small versus Base documentation must be reconciled before claiming the configuration matches the manuscript.
+- [x] **PASS** — Specs 017–019 and AD-003 establish the designated Small sources; Base and cross-source checkpoints are rejected.
 - [ ] **FAIL** — Deterministic mode required by the constitution is not invoked by result-producing scripts.
 - [~] **NEEDS VERIFICATION** — Checkpoint selection uses validation loss, not test performance, but final CLI evaluation does not enforce checkpoint stage/provenance.
 - [~] **NEEDS VERIFICATION** — Fresh generations are produced, but results lack durable split/checkpoint provenance.
@@ -185,11 +194,14 @@ No files, classes, model modules, configuration fields, or feature flags were ve
 
 **NOT READY**
 
-**Must fix before training/evaluation:** C1 (compressed decoder scaling), H1 (pre-label truncation policy), and H3 (deterministic mode). Also verify H2’s hard-rate calibration before reporting compression/efficiency claims.
+**Must fix before training/evaluation:** C1 (compressed decoder scaling) and H3
+(deterministic mode). H1 is resolved by Spec 023. Also verify H2’s hard-rate
+calibration before reporting compression/efficiency claims.
 
 **Should fix before final thesis experiments:** M1 (persisted split manifest) and M2 (validated CLI checkpoint loading).
 
-**Can defer until cleanup:** L1 and the Quick Wins, provided the authoritative architecture decision is separately recorded before reporting.
+**Can defer until cleanup:** the Quick Wins. L1 is resolved by Specs 017–019
+and AD-003.
 
 **Most important verification:** after C1 is fixed, use the exact same compressed encoder states and decoder inputs to prove that the wrappers’ teacher-forced logits match the underlying backbone’s configured LM-head behavior, then run a small end-to-end train/generate regression for both compressed variants.
 

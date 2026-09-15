@@ -1,5 +1,8 @@
 # Phase 1 Data Model: Noise-Adaptive ByT5 (TAHIMIK)
 
+> **Current source and parameter authority:**
+> `specs/019-mrt5-backed-tahimik/data-model.md`.
+
 The entities that carry the contribution. Two of them — `cn` and `navg` — are
 model state rather than data, and the distinction between them is the
 mechanism's core.

@@ -60,7 +60,7 @@ for and what the code actually does. Four classes:
 
 Convergence never edits code. It only records what it found.
 
-## The cross-cutting finding [RESOLVED 2026-09-08]
+## The cross-cutting model-source decision [CURRENT: 2026-09-15]
 
 One issue affected `003`, `004`, and `005` simultaneously, so it is stated once
 here rather than three times:
@@ -70,10 +70,10 @@ here rather than three times:
 Manuscript, Scope and Limitation: *"The base variant of ByT5 will be used, and
 both MrT5 and the proposed noise-adaptive model will adopt the base variant."*
 
-**Resolution (2026-09-08, AD-002)**:
-`configs/base.py` authoritatively sets `model_name = "google/byt5-base"`, inherited
-by all three model variants and the shared tokenizer in `scripts/run_experiment.py`.
-To preserve manuscript-equivalent effective batch sizes on constrained GPU hardware,
-gradient accumulation steps (8 for Stage 1, 4 for Stage 2) are paired with physical microbatches (2).
-Furthermore, `src/training/trainer.py` enforces checkpoint architecture validation
-so legacy `byt5-small` checkpoints cannot be inadvertently loaded into Base models.
+**Current resolution (2026-09-15, AD-003)**:
+`ByT5Config` selects `google/byt5-small`; `MrT5Config` and `TAHIMIKConfig`
+select `stanfordnlp/mrt5-small`. Gradient accumulation preserves effective
+batches of 16 and 8 using physical microbatches of 4. Checkpoint validation
+uses both the exact pretrained source and architecture fingerprint, so Base
+checkpoints and cross-source Small checkpoints are rejected. Specs 017–019 are
+the current model-source authorities.
